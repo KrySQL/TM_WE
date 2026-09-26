@@ -8,8 +8,9 @@ URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
-        " like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-    )
+        " like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.9",
 }
 SZUKANA_GRUPA = "I Technik masażysta_we"
 
@@ -18,6 +19,7 @@ def pobierz_wszystkie_linki():
   print(f"Pobieranie strony: {URL_STRONY} ...")
   try:
     response = requests.get(URL_STRONY, headers=HEADERS, timeout=15)
+    print(f"Status odpowiedzi HTTP: {response.status_code}")
     response.raise_for_status()
   except Exception as e:
     print(f"Błąd podczas pobierania strony: {e}")
@@ -26,21 +28,9 @@ def pobierz_wszystkie_linki():
   soup = BeautifulSoup(response.text, "html.parser")
   linki = []
 
-  # 1. Próba pobrania po wskazanym selektorze
-  selektor = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-child(1) > div > ul > li > a"
-  elementy_a = soup.select(selektor)
-
-  # 2. Selektor zapasowy, jeśli pierwszy nie zadziała
-  if not elementy_a:
-    print("Stosuję selektor zapasowy dla listy plików...")
-    elementy_a = soup.select(
-        "section.files div.container > div:nth-child(1) ul li a"
-    )
-
-  # 3. Ostatnia deska ratunku: znajdź absolutnie każdy link prowadzący do pliku .pdf na stronie
-  if not elementy_a:
-    print("Szukam uniwersalnie wszystkich plików PDF na stronie...")
-    elementy_a = soup.find_all("a", href=True)
+  # Pobieramy absolutnie wszystkie linki ze strony, żeby sprawdzić, co tam jest
+  elementy_a = soup.find_all("a", href=True)
+  print(f"Znaleziono ogółem elementów <a> na stronie: {len(elementy_a)}")
 
   seen_urls = set()
   for a in elementy_a:
@@ -54,7 +44,7 @@ def pobierz_wszystkie_linki():
         )
         linki.append({"nazwa": nazwa_pliku, "url": pelny_url})
 
-  print(f"Łącznie wykryto {len(linki)} plików PDF do przeglądnięcia.")
+  print(f"Łącznie wykryto unikalnych plików PDF: {len(linki)}")
   return linki
 
 
@@ -128,6 +118,12 @@ def generuj_strone():
   pliki_do_sprawdzenia = pobierz_wszystkie_linki()
   raport_przegladu = []
 
+  if not pliki_do_sprawdzenia:
+    print(
+        "⚠️ OSTRZEŻENIE: Nie wykryto żadnych linków PDF do pobrania. Sprawdź"
+        " status HTTP powyżej."
+    )
+
   for i, plik in enumerate(pliki_do_sprawdzenia, 1):
     print(
         f"\n[{i}/{len(pliki_do_sprawdzenia)}] Przeglądam: {plik['url']}"
@@ -147,9 +143,9 @@ def generuj_strone():
         status_sukces = True
         print(f"-> Zakończono analizę pliku. Znaleziono trafień: {len(wyniki)}")
       else:
-        print(f"-> Błąd HTTP: {odpowiedz.status_code}")
+        print(f"-> Błąd HTTP pobierania PDF: {odpowiedz.status_code}")
     except Exception as e:
-      print(f"-> Błąd pobierania: {e}")
+      print(f"-> Błąd pobierania pliku: {e}")
 
     raport_przegladu.append({
         "nazwa": plik["nazwa"],
@@ -212,7 +208,8 @@ def generuj_strone():
   else:
     html += (
         '<p style="text-align:center; color: red; margin-top: 40px;">Nie udało'
-        " się pobrać linków ze strony głównej.</p>"
+        " się pobrać linków ze strony głównej. Sprawdź konsolę, aby zobaczyć"
+        " status HTTP.</p>"
     )
 
   html += """</body>
@@ -220,7 +217,7 @@ def generuj_strone():
 
   with open("index.html", "w", encoding="utf-8") as f:
     f.write(html)
-  print("Zakończono sukcesem! Utworzono plik index.html.")
+  print("Zakończono! Zaktualizowano plik index.html.")
 
 
 if __name__ == "__main__":
