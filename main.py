@@ -119,8 +119,13 @@ def generuj_html():
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Plan Zajęć - I Technik masażysta_we</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
-        h1 { text-align: center; color: #2c3e50; }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; max-width: 900px; margin-left: auto; margin-right: auto; }
+        h1, h2 { text-align: center; color: #2c3e50; }
+        .sekcja-pliki { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 30px; border-left: 5px solid #27ae60; }
+        .sekcja-pliki ul { padding-left: 20px; margin: 10px 0; }
+        .sekcja-pliki li { margin-bottom: 8px; }
+        .sekcja-pliki a { color: #2980b9; text-decoration: none; font-weight: bold; }
+        .sekcja-pliki a:hover { text-decoration: underline; }
         .karta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #3498db; }
         .dokument-tytul { font-size: 1.1em; font-weight: bold; color: #e67e22; margin-bottom: 8px; border-bottom: 1px solid #eee; padding-bottom: 5px; }
         .naglowek { font-size: 0.9em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
@@ -131,6 +136,22 @@ def generuj_html():
 </head>
 <body>
     <h1>Plan Zajęć: I Technik masażysta_we</h1>
+    
+    <div class="sekcja-pliki">
+        <h2>Przetworzone pliki źródłowe ze strony TEB</h2>
+"""
+
+    if pdf_linki:
+        html += "        <ul>\n"
+        for item in pdf_linki:
+            html += f"            <li>📄 <a href=\"{item['url']}\" target=\"_blank\">{item['tytul']}</a> (<a href=\"{item['url']}\" target=\"_blank\" style=\"font-size:0.9em; color:#7f8c8d;\">Bezpośredni link do PDF</a>)</li>\n"
+        html += "        </ul>\n"
+    else:
+        html += "        <p>Nie znaleziono żadnych plików PDF w sekcji pobierania.</p>\n"
+
+    html += """    </div>
+
+    <h2>Wyniki wyszukiwania zajęć</h2>
 """
 
     if wszystkie_wyniki:
@@ -150,7 +171,7 @@ def generuj_html():
 
     with open("index.html", "w", encoding="utf-8") as f:
         f.write(html)
-    print("Zakończono sukcesem! Utworzono index.html.")
+    print("Zakończono sukcesem! Utworzono index.html z sekcją linków.")
 
 if __name__ == "__main__":
     generuj_html()
