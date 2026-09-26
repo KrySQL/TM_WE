@@ -26,25 +26,35 @@ def pobierz_wszystkie_linki():
   soup = BeautifulSoup(response.text, "html.parser")
   linki = []
 
-  # Dokładny selektor wskazany przez Ciebie
+  # 1. Próba pobrania po wskazanym selektorze
   selektor = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-child(1) > div > ul > li > a"
   elementy_a = soup.select(selektor)
 
+  # 2. Selektor zapasowy, jeśli pierwszy nie zadziała
   if not elementy_a:
     print("Stosuję selektor zapasowy dla listy plików...")
     elementy_a = soup.select(
         "section.files div.container > div:nth-child(1) ul li a"
     )
 
+  # 3. Ostatnia deska ratunku: znajdź absolutnie każdy link prowadzący do pliku .pdf na stronie
+  if not elementy_a:
+    print("Szukam uniwersalnie wszystkich plików PDF na stronie...")
+    elementy_a = soup.find_all("a", href=True)
+
+  seen_urls = set()
   for a in elementy_a:
     href = a.get("href")
-    nazwa_pliku = a.get_text(separator=" ", strip=True) or "Dokument PDF"
-
-    if href and href.lower().endswith(".pdf"):
+    if href and ".pdf" in href.lower():
       pelny_url = urllib.parse.urljoin(URL_STRONY, href)
-      linki.append({"nazwa": nazwa_pliku, "url": pelny_url})
+      if pelny_url not in seen_urls:
+        seen_urls.add(pelny_url)
+        nazwa_pliku = a.get_text(separator=" ", strip=True) or os.path.basename(
+            urllib.parse.urlparse(pelny_url).path
+        )
+        linki.append({"nazwa": nazwa_pliku, "url": pelny_url})
 
-  print(f"Łącznie wykryto {len(linki)} plików PDF na liście do przeglądnięcia.")
+  print(f"Łącznie wykryto {len(linki)} plików PDF do przeglądnięcia.")
   return linki
 
 
@@ -165,8 +175,8 @@ def generuj_strone():
         p.sub {{ text-align: center; color: #7f8c8d; font-size: 0.9em; }}
         .sekcja-pliku {{ margin-top: 25px; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 5px solid #3498db; }}
         .tytul-pliku {{ font-size: 1.15em; font-weight: bold; margin-bottom: 5px; }}
-        .url-info {{ font-size: 0.8em; color: #95a5a6; margin-bottom: 15px; word-break: break-all; }}
-        .url-info a {{ color: #2980b9; text-decoration: none; }}
+        .url-info {{ font-size: 0.9em; color: #7f8c8d; margin-bottom: 15px; word-break: break-all; }}
+        .url-info a {{ color: #2980b9; text-decoration: none; font-weight: bold; }}
         .url-info a:hover {{ text-decoration: underline; }}
         .karta {{ background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; padding: 15px; margin-bottom: 10px; }}
         .naglowek {{ font-size: 0.85em; color: #7f8c8d; margin-bottom: 8px; font-weight: bold; }}
@@ -183,7 +193,7 @@ def generuj_strone():
     for poz in raport_przegladu:
       html += f"""    <div class="sekcja-pliku">
         <div class="tytul-pliku">📄 {poz['nazwa']}</div>
-        <div class="url-info">Link źródłowy: <a href="{poz['url']}" target="_blank">{poz['url']}</a></div>
+        <div class="url-info">Link bezpośredni do pliku PDF: <a href="{poz['url']}" target="_blank">{poz['url']}</a></div>
 """
       if poz["dane"]:
         for wynik in poz["dane"]:
@@ -194,16 +204,15 @@ def generuj_strone():
 """
       else:
         html += (
-            "        <div class="
-            'karta brak-danych">Brak zajęć dla tej grupy w tym'
-            " dokumencie.</div>\n"
+            '        <div class="karta brak-danych">Brak zajęć dla tej grupy w'
+            " tym dokumencie.</div>\n"
         )
 
       html += "    </div>\n"
   else:
     html += (
         '<p style="text-align:center; color: red; margin-top: 40px;">Nie udało'
-        " się pobrać linków.</p>"
+        " się pobrać linków ze strony głównej.</p>"
     )
 
   html += """</body>
@@ -211,7 +220,7 @@ def generuj_strone():
 
   with open("index.html", "w", encoding="utf-8") as f:
     f.write(html)
-  print("Zakończono sukcesem!")
+  print("Zakończono sukcesem! Utworzono plik index.html.")
 
 
 if __name__ == "__main__":
