@@ -20,7 +20,6 @@ def pobierz_wszystkie_linki():
     soup = BeautifulSoup(response.text, 'html.parser')
     linki = []
     
-    # Precyzyjny selektor wskazany przez Ciebie
     selektor = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-of-type(1) > div > ul > li > a"
     elementy_a = soup.select(selektor)
     
@@ -30,7 +29,6 @@ def pobierz_wszystkie_linki():
 
     for a in elementy_a:
         href = a.get('href')
-        # Wyciągamy czysty tekst nazwy pliku (ignorując tagi span ze znaleziska)
         nazwa_pliku = a.get_text(separator=" ", strip=True) or "Dokument PDF"
         
         if href and href.lower().endswith('.pdf'):
@@ -66,17 +64,14 @@ def analizuj_pdf(sciezka_pdf):
                     pelny_tekst = " ".join(wiersz)
                     pelny_tekst_lower = pelny_tekst.lower()
                     
-                    # Złapanie nagłówków godzinowych
                     if "semestr" in pelny_tekst_lower or "8:00" in pelny_tekst_lower or "godz" in pelny_tekst_lower:
                         aktualne_naglowki = wiersz
                         
-                    # Elastyczne szukanie grupy masażystów (sprawdzamy czy w wierszu pojawia się "masażysta")
                     if "masażysta" in pelny_tekst_lower or "masazysta" in pelny_tekst_lower:
                         print(f"  -> Znaleziono pasujący wiersz na stronie {nr_strony + 1}: {pelny_tekst[:80]}...")
                         
-                        # Usuwamy nazwę grupy z początku, żeby zostały same sale/godziny zajęć
                         zajecia_tekst = pelny_tekst
-                        for slowo_klucz in ["i technik masażysta_we", "i technik masażysta", "masażysta"]:
+                        for slowo_klucz in ["i technik masażysta_we", "i technik masażysta", "masażysta", "masazysta"]:
                             zajecia_tekst = zajecia_tekst.replace(slowo_klucz, "").strip()
                         
                         wyniki_pdf.append({
@@ -94,7 +89,8 @@ def generuj_strone():
     raport_przegladu = []
 
     for i, plik in enumerate(pliki_do_sprawdzenia, 1):
-        print(f"\n[{i}/{len(pliki_do_sprawdzenia)}] Przeglądam: {plik['url']} ({plik['nazwa'])})")
+        # Poprawiono błąd z podwójnym nawiasem w tym miejscu:
+        print(f"\n[{i}/{len(pliki_do_sprawdzenia)}] Przeglądam: {plik['url']} ({plik['nazwa']})")
         
         status_sukces = False
         wyniki = []
@@ -137,9 +133,9 @@ def generuj_strone():
         p.sub {{ text-align: center; color: #7f8c8d; font-size: 0.9em; }}
         .sekcja-pliku {{ margin-top: 25px; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 5px solid #3498db; }}
         .tytul-pliku {{ font-size: 1.15em; font-weight: bold; margin-bottom: 5px; }}
-        .tytul-pliku a {{ color: #2980b9; text-decoration: none; }}
-        .tytul-pliku a:hover {{ text-decoration: underline; }}
         .url-info {{ font-size: 0.8em; color: #95a5a6; margin-bottom: 15px; word-break: break-all; }}
+        .url-info a {{ color: #2980b9; text-decoration: none; }}
+        .url-info a:hover {{ text-decoration: underline; }}
         .karta {{ background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; padding: 15px; margin-bottom: 10px; }}
         .naglowek {{ font-size: 0.85em; color: #7f8c8d; margin-bottom: 8px; font-weight: bold; }}
         .zajecia {{ font-size: 1.05em; color: #2c3e50; font-weight: bold; }}
