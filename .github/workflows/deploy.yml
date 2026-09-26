@@ -3,7 +3,7 @@ name: Aktualizuj Plan Zajęć
 on:
   workflow_dispatch: # Pozwala ręcznie odpalić skrypt z poziomu GitHuba
   schedule:
-    - cron: '0 6,18 * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00
+    - cron: '0 * * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00
   push:
     branches:
       - main # Skrypt uruchomi się przy jakiejkolwiek edycji plików
