@@ -8,52 +8,64 @@ import pdfplumber
 URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 
 def pobierz_liste_pdfow():
-    print("Pobieranie listy plikow ze strony TEB...")
+    print("Pobieranie listy plików ze strony TEB...")
     
-    # Tworzymy scraper odporny na zabezpieczenia Cloudflare
     scraper = cloudscraper.create_scraper()
-    
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7'
     }
     
     try:
         response = scraper.get(URL_STRONY, headers=headers)
-        response.raise_for_status()
+        print(f"Status HTTP odpowiedzi: {response.status_code}")
+        print(f"Długość pobranego kodu HTML: {len(response.text)} znaków")
+        
+        if response.status_code != 200:
+            print(f"BŁĄD: Serwer zwrócił kod inny niż 200! Początek odpowiedzi: {response.text[:300]}")
+            return []
+            
     except Exception as e:
-        print(f"Błąd podczas pobierania strony: {e}")
+        print(f"Wyjątek podczas pobierania strony: {e}")
         return []
 
     soup = BeautifulSoup(response.text, 'html.parser')
+    
+    # Debug: sprawdźmy tytuł strony, żeby upewnić się, że to nie strona blokady Cloudflare
+    tytul_strony = soup.title.string if soup.title else "Brak tytułu"
+    print(f"Wykryty tytuł strony: {tytul_strony}")
+
     znalezione_linki = set()
 
     # Przeszukujemy każdy tag <a> na stronie
     for a in soup.find_all('a', href=True):
         href = a['href']
-        # Pełny URL (gdyby link był względny)
         pelny_url = urljoin(URL_STRONY, href)
         
-        # Filtrowanie według Twoich wytycznych:
-        # musi zaczynać się na wskazany adres i kończyć na .pdf
+        # Filtrowanie według Twoich wytycznych
         if pelny_url.startswith("https://teb.pl/wp-content/uploads/poznan/") and pelny_url.endswith(".pdf"):
             znalezione_linki.add(pelny_url)
 
     lista_pdfow = sorted(list(znalezione_linki))
-    print(f"Znaleziono unikalnych pliku PDF: {len(lista_pdfow)}")
+    print(f"Znaleziono unikalnych plików PDF: {len(lista_pdfow)}")
     for link in lista_pdfow:
         print(f" -> {link}")
         
     return lista_pdfow
 
 def przetworz_pdfy():
-    pdf_Linki = pobierz_liste_pdfow()
+    pdf_linki = pobierz_liste_pdfow()
     wyniki = []
+    
+    if not pdf_linki:
+        print("Brak linków do przetworzenia!")
+        return pdf_linki, wyniki
     
     TOLERANCJA_Y = 5 
     scraper = cloudscraper.create_scraper()
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
 
-    for idx, url in enumerate(pdf_Linki):
+    for idx, url in enumerate(pdf_linki):
         nazwa_pliku_tymczasowa = f"plan_{idx}.pdf"
         print(f"Pobieranie pliku: {url}")
         
@@ -107,7 +119,7 @@ def przetworz_pdfy():
         except Exception as e:
             print(f"Błąd przetwarzania PDF {nazwa_pliku_tymczasowa}: {e}")
 
-    return pdf_Linki, wyniki
+    return pdf_linki, wyniki
 
 def generuj_html():
     pobrane_linki, wyniki = przetworz_pdfy()
@@ -125,6 +137,7 @@ def generuj_html():
         h1, h2 { text-align: center; color: #2c3e50; }
         .karta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #3498db; }
         .karta-lista { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 25px; border-left: 5px solid #2ecc71; }
+        .karta-pusta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #e74c3c; text-align: center; }
         .naglowek { font-size: 0.9em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
         .zajecia { font-size: 1.1em; color: #2c3e50; font-weight: bold; }
         .strona-info { font-size: 0.8em; color: #bdc3c7; margin-top: 10px; text-align: right; }
@@ -146,7 +159,7 @@ def generuj_html():
             html += f'            <li><a href="{link}" target="_blank">{link}</a></li>\n'
         html += "        </ul>\n"
     else:
-        html += "        <p>Nie znaleziono żadnych pasujących plików PDF na stronie.</p>\n"
+        html += "        <p style='color: #c0392b; font-weight: bold;'>Nie znaleziono żadnych pasujących plików PDF na stronie (lub strona zablokowała zapytanie). Sprawdź logi w GitHub Actions!</p>\n"
     
     html += "    </div>\n\n    <h2>Wyniki wyszukiwania zajęć:</h2>\n"
 
@@ -159,7 +172,7 @@ def generuj_html():
     </div>
 """
     else:
-        html += '    <div class="karta"><div class="zajecia">Nie znaleziono zajęć dla tej grupy w przetworzonych dokumentach.</div></div>\n'
+        html += '    <div class="karta-pusta"><div class="zajecia">Nie znaleziono pasujących zajęć dla grupy „I Technik masażysta_we” w pobranym okresie.</div></div>\n'
 
     html += """</body>
 </html>"""
