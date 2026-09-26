@@ -28,7 +28,7 @@ jobs:
         
       - name: Zainstaluj wymagane biblioteki
         run: |
-          pip install requests pdfplumber beautifulsoup4 playwright
+          pip install requests pdfplumber beautifulsoup4 playwright cloudscraper
           playwright install chromium
           
       - name: Uruchom skrypt
