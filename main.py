@@ -6,38 +6,64 @@ URL = "https://teb.pl/wp-content/uploads/poznan/2026/09/plan-salek-25.09.pdf"
 
 def pobierz_pdf():
     print("Pobieranie pliku PDF...")
-    response = requests.get(URL)
+    # Dodajemy nagłówki przeglądarki, bo niektóre serwery blokują automatyczne skrypty
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+    response = requests.get(URL, headers=headers)
     with open("plan.pdf", "wb") as f:
         f.write(response.content)
 
 def generuj_html():
     pobierz_pdf()
-    print("Przeszukiwanie tabel w PDF...")
+    print("Przeszukiwanie tekstu w PDF...")
     
     wyniki = []
     aktualne_naglowki = []
     
+    # Tolerancja pionowa w punktach - decyduje, czy tekst na lekko innej wysokości
+    # ma zostać potraktowany jako ten sam wiersz tabeli.
+    TOLERANCJA_Y = 5 
+
     with pdfplumber.open("plan.pdf") as pdf:
-        for strona in pdf.pages:
-            tabele = strona.extract_tables()
-            for tabela in tabele:
-                for wiersz in tabela:
-                    # Oczyszczenie wiersza 
-                    oczyszczony_wiersz = [str(komorka).strip().replace('\n', '') if komorka else "" for komorka in wiersz]
+        for nr_strony, strona in enumerate(pdf.pages):
+            # Wyciągamy każde pojedyncze słowo ze strony wraz ze współrzędnymi
+            slowa = strona.extract_words()
+            
+            # Grupowanie słów w rzędy na podstawie osi Y
+            rzedy = {}
+            for slowo in slowa:
+                y = round(slowo['top'] / TOLERANCJA_Y) * TOLERANCJA_Y
+                tekst = slowo['text']
+                if y not in rzedy:
+                    rzedy[y] = []
+                rzedy[y].append(tekst)
+                
+            # Zbieranie ułożonych rzędów
+            posortowane_wysokosci = sorted(rzedy.keys())
+            
+            for y in posortowane_wysokosci:
+                wiersz = rzedy[y]
+                pelny_tekst = " ".join(wiersz)
+                
+                # Zapisywanie rzędu z nagłówkami
+                if "semestr / grupa" in pelny_tekst.lower() or "8:00" in pelny_tekst:
+                    # Łączymy wszystkie fragmenty godzin w jeden ciąg, żeby to łatwiej zrzucić
+                    aktualne_naglowki = wiersz
                     
-                    if len(oczyszczony_wiersz) == 0:
-                        continue
+                # Szukanie konkretnej grupy
+                if "I" in wiersz and "Technik" in wiersz and ("masażysta_we" in wiersz or "masażysta" in wiersz):
+                    
+                    # Usunięcie z przodu słów "I Technik masażysta_we", żeby zostały same zajęcia
+                    zajecia_tekst = pelny_tekst.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip()
+                    
+                    # Zabezpieczenie na wypadek, gdyby nagłówków nie znaleziono
+                    if not aktualne_naglowki:
+                        aktualne_naglowki = ["Brak nagłówków (sprawdź oryginalny plik)"]
                         
-                    # Przechwytujemy wiersz z godzinami 
-                    if "semestr / grupa" in oczyszczony_wiersz[0]:
-                        aktualne_naglowki = oczyszczony_wiersz
-                        
-                    # Szukamy zajęć i łączymy je z ostatnio zapamiętanymi nagłówkami
-                    if "I Technik masażysta_we" in oczyszczony_wiersz[0]:
-                        wyniki.append({
-                            "naglowki": aktualne_naglowki,
-                            "zajecia": oczyszczony_wiersz
-                        })
+                    wyniki.append({
+                        "strona": nr_strony + 1,
+                        "naglowki": " ".join(aktualne_naglowki),
+                        "zajecia": zajecia_tekst if zajecia_tekst else "Dzień wolny (brak przydzielonych zajęć/sal)"
+                    })
 
     print("Generowanie pliku index.html...")
     
@@ -50,12 +76,10 @@ def generuj_html():
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
         h1 { text-align: center; color: #2c3e50; }
-        .tabela-kontener { overflow-x: auto; margin-bottom: 30px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        table { border-collapse: collapse; width: 100%; min-width: 1000px; background-color: #fff; }
-        th, td { border: 1px solid #ddd; padding: 10px; text-align: center; font-size: 14px; }
-        th { background-color: #3498db; color: white; min-width: 80px; }
-        td { min-width: 80px; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
+        .karta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #3498db; }
+        .naglowek { font-size: 0.9em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
+        .zajecia { font-size: 1.1em; color: #2c3e50; font-weight: bold; }
+        .strona-info { font-size: 0.8em; color: #bdc3c7; margin-top: 10px; text-align: right; }
     </style>
 </head>
 <body>
@@ -64,23 +88,14 @@ def generuj_html():
 
     if wyniki:
         for wynik in wyniki:
-            html += '    <div class="tabela-kontener">\n        <table>\n            <tr>\n'
-            
-            # Renderowanie nagłówków (godzin)
-            for naglowek in wynik["naglowki"]:
-                wartosc_naglowka = naglowek if naglowek else "-"
-                html += f"                <th>{wartosc_naglowka}</th>\n"
-            html += "            </tr>\n            <tr>\n"
-            
-            # Renderowanie zajęć
-            for komorka in wynik["zajecia"]:
-                # Zamiana całkowicie pustych komórek na estetyczny myślnik
-                wartosc = komorka if komorka else "-"
-                html += f"                <td>{wartosc}</td>\n"
-            
-            html += "            </tr>\n        </table>\n    </div>\n"
+            html += f"""    <div class="karta">
+        <div class="naglowek">Wykryte godziny (Oś czasu z dokumentu):<br>{wynik['naglowki']}</div>
+        <div class="zajecia">Wykryte zajęcia/sale:<br>{wynik['zajecia']}</div>
+        <div class="strona-info">Znaleziono na stronie {wynik['strona']}</div>
+    </div>
+"""
     else:
-        html += "    <p style='text-align:center;'>Nie znaleziono zajęć dla tej grupy w analizowanym pliku.</p>\n"
+        html += '    <div class="karta"><div class="zajecia">Nie znaleziono zajęć dla tej grupy. Być może format pliku PDF znacznie się zmienił.</div></div>\n'
 
     html += """</body>
 </html>"""
