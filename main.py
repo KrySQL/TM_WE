@@ -41,7 +41,7 @@ def pobierz_linki_pdf():
             else:
                 print(f"[ODRZUCONY]  [{index}] Link nie spełnia kryteriów: {href}")
                 
-    print(----------------------------------------\n)
+  
     print(f"Łącznie zakwalifikowano {len(pdf_linki)} plików PDF do sprawdzenia.")
     return pdf_linki
 
