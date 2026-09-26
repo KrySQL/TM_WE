@@ -1,0 +1,45 @@
+name: Aktualizuj Plan Zajęć
+
+on:
+  workflow_dispatch: # Pozwala ręcznie odpalić skrypt z poziomu GitHuba
+  schedule:
+    - cron: '0 6,18 * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00 (opcjonalnie)
+  push:
+    branches:
+      - main # Skrypt uruchomi się przy jakiejkolwiek edycji plików
+
+# Uprawnienia wymagane przez mechanizm GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz kod repozytorium
+        uses: actions/checkout@v4
+
+      - name: Skonfiguruj Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Zainstaluj wymagane biblioteki
+        run: pip install requests pdfplumber
+
+      - name: Uruchom skrypt
+        run: python main.py
+
+      - name: Skonfiguruj GitHub Pages
+        uses: actions/configure-pages@v4
+
+      - name: Wgraj plik (Artifact)
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'
+
+      - name: Wdróż na stronę GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
