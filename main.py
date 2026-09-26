@@ -20,16 +20,12 @@ def pobierz_wszystkie_linki():
     soup = BeautifulSoup(response.text, 'html.parser')
     linki = []
     
-    # Precyzyjny selektor wyciągający absolutnie wszystkie linki <a> ze wszystkich elementów <li> w tej liście
     selektor = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-of-type(1) > div > ul > li > a"
     elementy_a = soup.select(selektor)
     
-    # Jeśli struktura HTML zmieni się na serwerze, stosujemy bezpieczny selektor zapasowy
     if not elementy_a:
         print("Stosuję selektor zapasowy dla listy plików...")
         elementy_a = soup.select("section.files div.container > div:nth-of-type(1) ul li a")
-
-    print(f"Znaleziono {len(elementy_a)} elementów <a> na liście.")
 
     for a in elementy_a:
         href = a.get('href')
@@ -39,7 +35,7 @@ def pobierz_wszystkie_linki():
             pelny_url = urllib.parse.urljoin(URL_STRONY, href)
             linki.append({"nazwa": nazwa_pliku, "url": pelny_url})
             
-    print(f"Łącznie zakwalifikowano do sprawdzenia {len(linki)} plików PDF.")
+    print(f"Łącznie wykryto {len(linki)} plików PDF na liście do przeglądnięcia.")
     return linki
 
 def analizuj_pdf(sciezka_pdf):
@@ -85,10 +81,14 @@ def analizuj_pdf(sciezka_pdf):
 
 def generuj_strone():
     pliki_do_sprawdzenia = pobierz_wszystkie_linki()
-    wszystkie_wyniki = {}
+    raport_przegladu = []
 
-    for plik in pliki_do_sprawdzenia:
-        print(f"Pobieranie i analiza: {plik['nazwa']}...")
+    for i, plik in enumerate(pliki_do_sprawdzenia, 1):
+        print(f"\n[{i}/{len(pliki_do_sprawdzenia)}] Rozpoczynam przeglądanie linku: {plik['url']} ({plik['nazwa']})")
+        
+        status_sukces = False
+        wyniki = []
+        
         try:
             odpowiedz = requests.get(plik['url'], headers=HEADERS, timeout=15)
             if odpowiedz.status_code == 200:
@@ -96,18 +96,24 @@ def generuj_strone():
                     f.write(odpowiedz.content)
                     
                 wyniki = analizuj_pdf("temp.pdf")
-                if wyniki:
-                    wszystkie_wyniki[plik['nazwa']] = {
-                        "url": plik['url'],
-                        "dane": wyniki
-                    }
+                status_sukces = True
+                print(f"-> Przeanalizowano pomyślnie. Znaleziono pasujących wpisów: {len(wyniki)}")
+            else:
+                print(f"-> Błąd HTTP: {odpowiedz.status_code}")
         except Exception as e:
-            print(f"Pominięto {plik['nazwa']} z powodu błędu: {e}")
+            print(f"-> Błąd podczas pobierania/analizy: {e}")
+            
+        raport_przegladu.append({
+            "nazwa": plik['nazwa'],
+            "url": plik['url'],
+            "sukces": status_sukces,
+            "dane": wyniki
+        })
         
     if os.path.exists("temp.pdf"):
         os.remove("temp.pdf")
 
-    print("Tworzenie pliku index.html...")
+    print("\nTworzenie pliku index.html...")
     
     html = f"""<!DOCTYPE html>
 <html lang="pl">
@@ -120,33 +126,40 @@ def generuj_strone():
         h1 {{ text-align: center; color: #2c3e50; }}
         p.sub {{ text-align: center; color: #7f8c8d; font-size: 0.9em; }}
         .sekcja-pliku {{ margin-top: 25px; padding: 20px; background: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-top: 5px solid #3498db; }}
-        .tytul-pliku {{ font-size: 1.15em; font-weight: bold; margin-bottom: 15px; }}
+        .tytul-pliku {{ font-size: 1.15em; font-weight: bold; margin-bottom: 5px; }}
         .tytul-pliku a {{ color: #2980b9; text-decoration: none; }}
         .tytul-pliku a:hover {{ text-decoration: underline; }}
+        .url-info {{ font-size: 0.8em; color: #95a5a6; margin-bottom: 15px; word-break: break-all; }}
         .karta {{ background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; padding: 15px; margin-bottom: 10px; }}
         .naglowek {{ font-size: 0.85em; color: #7f8c8d; margin-bottom: 8px; font-weight: bold; }}
         .zajecia {{ font-size: 1.05em; color: #2c3e50; font-weight: bold; }}
+        .brak-danych {{ color: #e67e22; font-size: 0.9em; font-style: italic; }}
     </style>
 </head>
 <body>
     <h1>Plan Zajęć: {SZUKANA_GRUPA}</h1>
-    <p class="sub">Wyniki wyszukiwania ze wszystkich plików z wybranej listy na stronie TEB Poznań.</p>
+    <p class="sub">Automatyczny monitoring wszystkich dokumentów ze strefy słuchacza TEB Poznań.</p>
 """
 
-    if wszystkie_wyniki:
-        for nazwa_pliku, zawartosc in wszystkie_wyniki.items():
+    if raport_przegladu:
+        for poz in raport_przegladu:
             html += f"""    <div class="sekcja-pliku">
-        <div class="tytul-pliku">📄 <a href="{zawartosc['url']}" target="_blank">{nazwa_pliku}</a></div>
+        <div class="tytul-pliku">📄 {poz['nazwa']}</div>
+        <div class="url-info">Link źródłowy: <a href="{poz['url']}" target="_blank">{poz['url']}</a></div>
 """
-            for wynik in zawartosc['dane']:
-                html += f"""        <div class="karta">
+            if poz['dane']:
+                for wynik in poz['dane']:
+                    html += f"""        <div class="karta">
             <div class="naglowek">Godziny (Oś czasu):<br>{wynik['naglowki']}</div>
             <div class="zajecia">Zajęcia / Sala:<br>{wynik['zajecia']}</div>
         </div>
 """
+            else:
+                html += '        <div class="karta brak-danych">Przeanalizowano ten dokument, ale brak zajęć dla Twojej grupy.</div>\n'
+                
             html += "    </div>\n"
     else:
-        html += '<p style="text-align:center; color: red; margin-top: 40px;">Brak pasujących zajęć w przetworzonych plikach.</p>'
+        html += '<p style="text-align:center; color: red; margin-top: 40px;">Nie udało się pobrać żadnych linków z podanej sekcji.</p>'
 
     html += """</body>
 </html>"""
