@@ -8,7 +8,7 @@ URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 HEADERS = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
 SZUKANA_GRUPA = "I Technik masażysta_we"
 
-def pobierz_wszystkie_linki_z_ul():
+def pobierz_wszystkie_linki():
     print(f"Pobieranie strony: {URL_STRONY} ...")
     try:
         response = requests.get(URL_STRONY, headers=HEADERS, timeout=15)
@@ -20,32 +20,26 @@ def pobierz_wszystkie_linki_z_ul():
     soup = BeautifulSoup(response.text, 'html.parser')
     linki = []
     
-    # Selektor wskazujący na wybraną listę UL
-    selektor_ul = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-of-type(1) > div > ul"
-    ul_element = soup.select_one(selektor_ul)
+    # Precyzyjny selektor wyciągający absolutnie wszystkie linki <a> ze wszystkich elementów <li> w tej liście
+    selektor = "body > div.root > div.page.page-departments.subpage-downloads > section.files > div > div:nth-of-type(1) > div > ul > li > a"
+    elementy_a = soup.select(selektor)
     
-    # Zapasowy selektor na przypadek różnic w strukturze klas
-    if not ul_element:
-        print("Nie znaleziono ścieżki pełnej. Używam selektora zapasowego...")
-        ul_element = soup.select_one("section.files div.container > div:nth-of-type(1) ul")
+    # Jeśli struktura HTML zmieni się na serwerze, stosujemy bezpieczny selektor zapasowy
+    if not elementy_a:
+        print("Stosuję selektor zapasowy dla listy plików...")
+        elementy_a = soup.select("section.files div.container > div:nth-of-type(1) ul li a")
 
-    if not ul_element:
-        print("Nie udało się zlokalizować listy UL na stronie.")
-        return []
-
-    # Wyciągamy WSZYSTKIE odnośniki <a> bez przefiltrowywania po nazwach
-    elementy_a = ul_element.find_all('a')
+    print(f"Znaleziono {len(elementy_a)} elementów <a> na liście.")
 
     for a in elementy_a:
         href = a.get('href')
         nazwa_pliku = a.text.strip() or "Dokument PDF"
         
-        # Bierzemy każdy link kończący się na .pdf
         if href and href.lower().endswith('.pdf'):
             pelny_url = urllib.parse.urljoin(URL_STRONY, href)
             linki.append({"nazwa": nazwa_pliku, "url": pelny_url})
             
-    print(f"Wykryto łącznie {len(linki)} plików PDF na liście. Wszystkie zostaną przetworzone.")
+    print(f"Łącznie zakwalifikowano do sprawdzenia {len(linki)} plików PDF.")
     return linki
 
 def analizuj_pdf(sciezka_pdf):
@@ -90,7 +84,7 @@ def analizuj_pdf(sciezka_pdf):
     return wyniki_pdf
 
 def generuj_strone():
-    pliki_do_sprawdzenia = pobierz_wszystkie_linki_z_ul()
+    pliki_do_sprawdzenia = pobierz_wszystkie_linki()
     wszystkie_wyniki = {}
 
     for plik in pliki_do_sprawdzenia:
@@ -102,12 +96,13 @@ def generuj_strone():
                     f.write(odpowiedz.content)
                     
                 wyniki = analizuj_pdf("temp.pdf")
-                wszystkie_wyniki[plik['nazwa']] = {
-                    "url": plik['url'],
-                    "dane": wyniki
-                }
+                if wyniki:
+                    wszystkie_wyniki[plik['nazwa']] = {
+                        "url": plik['url'],
+                        "dane": wyniki
+                    }
         except Exception as e:
-            print(f"Pominięto {plik['nazwa']} z powodu błędu pobierania: {e}")
+            print(f"Pominięto {plik['nazwa']} z powodu błędu: {e}")
         
     if os.path.exists("temp.pdf"):
         os.remove("temp.pdf")
@@ -131,12 +126,11 @@ def generuj_strone():
         .karta {{ background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 5px; padding: 15px; margin-bottom: 10px; }}
         .naglowek {{ font-size: 0.85em; color: #7f8c8d; margin-bottom: 8px; font-weight: bold; }}
         .zajecia {{ font-size: 1.05em; color: #2c3e50; font-weight: bold; }}
-        .brak-danych {{ color: #e74c3c; font-size: 0.9em; }}
     </style>
 </head>
 <body>
     <h1>Plan Zajęć: {SZUKANA_GRUPA}</h1>
-    <p class="sub">Wszystkie pliki pobrane bez filtrowania z sekcji planów na stronie TEB.</p>
+    <p class="sub">Wyniki wyszukiwania ze wszystkich plików z wybranej listy na stronie TEB Poznań.</p>
 """
 
     if wszystkie_wyniki:
@@ -144,19 +138,15 @@ def generuj_strone():
             html += f"""    <div class="sekcja-pliku">
         <div class="tytul-pliku">📄 <a href="{zawartosc['url']}" target="_blank">{nazwa_pliku}</a></div>
 """
-            if zawartosc['dane']:
-                for wynik in zawartosc['dane']:
-                    html += f"""        <div class="karta">
+            for wynik in zawartosc['dane']:
+                html += f"""        <div class="karta">
             <div class="naglowek">Godziny (Oś czasu):<br>{wynik['naglowki']}</div>
             <div class="zajecia">Zajęcia / Sala:<br>{wynik['zajecia']}</div>
         </div>
 """
-            else:
-                html += '        <div class="karta brak-danych">Nie znaleziono wiersza dla tej grupy w tym pliku.</div>\n'
-                
             html += "    </div>\n"
     else:
-        html += '<p style="text-align:center; color: red;">Brak jakichkolwiek plików PDF na liście.</p>'
+        html += '<p style="text-align:center; color: red; margin-top: 40px;">Brak pasujących zajęć w przetworzonych plikach.</p>'
 
     html += """</body>
 </html>"""
