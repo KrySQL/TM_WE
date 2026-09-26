@@ -29,6 +29,9 @@ jobs:
       - name: Zainstaluj wymagane biblioteki
         run: pip install requests pdfplumber
 
+      - name: Zainstaluj wymagane biblioteki
+        run: pip install requests pdfplumber beautifulsoup4
+
       - name: Uruchom skrypt
         run: python main.py
 
