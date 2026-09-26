@@ -1,48 +1,49 @@
-import os
+os = __import__('os')
 from urllib.parse import urljoin
-import cloudscraper
 from bs4 import BeautifulSoup
 import pdfplumber
+import cloudscraper
+from playwright.sync_api import sync_playwright
 
-# Adres strony ze strefą słuchacza TEB Poznań
 URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 
 def pobierz_liste_pdfow():
-    print("Pobieranie listy plików ze strony TEB...")
+    print("Uruchamianie przeglądarki Playwright w celu ominięcia Cloudflare...")
     
-    scraper = cloudscraper.create_scraper()
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept-Language': 'pl-PL,pl;q=0.9,en-US;q=0.8,en;q=0.7'
-    }
-    
-    try:
-        response = scraper.get(URL_STRONY, headers=headers)
-        print(f"Status HTTP odpowiedzi: {response.status_code}")
-        print(f"Długość pobranego kodu HTML: {len(response.text)} znaków")
+    with sync_playwright() as p:
+        # Uruchamiamy przeglądarkę w tle
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         
-        if response.status_code != 200:
-            print(f"BŁĄD: Serwer zwrócił kod inny niż 200! Początek odpowiedzi: {response.text[:300]}")
+        try:
+            print(f"Otwieranie strony: {URL_STRONY}")
+            page.goto(URL_STRONY, timeout=60000)
+            
+            # Czekamy chwilę, aż Cloudflare zweryfikuje żądanie i strona się wyrenderuje
+            page.wait_for_timeout(6000)
+            
+            html_content = page.content()
+            print(f"Pobrano kod HTML przez Playwright, długość: {len(html_content)} znaków")
+        except Exception as e:
+            print(f"Błąd podczas ładowania strony przez Playwright: {e}")
+            browser.close()
             return []
             
-    except Exception as e:
-        print(f"Wyjątek podczas pobierania strony: {e}")
-        return []
+        browser.close()
 
-    soup = BeautifulSoup(response.text, 'html.parser')
+    soup = BeautifulSoup(html_content, 'html.parser')
     
-    # Debug: sprawdźmy tytuł strony, żeby upewnić się, że to nie strona blokady Cloudflare
     tytul_strony = soup.title.string if soup.title else "Brak tytułu"
     print(f"Wykryty tytuł strony: {tytul_strony}")
 
     znalezione_linki = set()
 
-    # Przeszukujemy każdy tag <a> na stronie
     for a in soup.find_all('a', href=True):
         href = a['href']
         pelny_url = urljoin(URL_STRONY, href)
         
-        # Filtrowanie według Twoich wytycznych
         if pelny_url.startswith("https://teb.pl/wp-content/uploads/poznan/") and pelny_url.endswith(".pdf"):
             znalezione_linki.add(pelny_url)
 
@@ -159,7 +160,7 @@ def generuj_html():
             html += f'            <li><a href="{link}" target="_blank">{link}</a></li>\n'
         html += "        </ul>\n"
     else:
-        html += "        <p style='color: #c0392b; font-weight: bold;'>Nie znaleziono żadnych pasujących plików PDF na stronie (lub strona zablokowała zapytanie). Sprawdź logi w GitHub Actions!</p>\n"
+        html += "        <p style='color: #c0392b; font-weight: bold;'>Nie znaleziono żadnych pasujących plików PDF na stronie. Sprawdź logi w GitHub Actions!</p>\n"
     
     html += "    </div>\n\n    <h2>Wyniki wyszukiwania zajęć:</h2>\n"
 
