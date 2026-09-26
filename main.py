@@ -52,7 +52,7 @@ def przetworz_pdfy():
     
     if not pdf_linki:
         print("Brak linków do przetworzenia!")
-        return pdf_linki, wyniki
+        return wyniki
     
     TOLERANCJA_Y = 5 
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'}
@@ -76,70 +76,63 @@ def przetworz_pdfy():
                 for nr_strony, strona in enumerate(pdf.pages):
                     slowa = strona.extract_words()
                     
+                    # Grupowanie słów w rzędy (oś Y)
                     rzedy = {}
                     for slowo in slowa:
                         y = round(slowo['top'] / TOLERANCJA_Y) * TOLERANCJA_Y
                         if y not in rzedy:
                             rzedy[y] = []
-                        rzedy[y].append((slowo['x0'], slowo['x1'], slowo['text']))
+                        rzedy[y].append(slowo)
                         
                     posortowane_wysokosci = sorted(rzedy.keys())
                     aktualne_naglowki = []
                     
                     for y in posortowane_wysokosci:
-                        wiersz_dane = rzedy[y]
-                        wiersz_dane.sort(key=lambda item: item[0])
+                        wiersz_slowa = sorted(rzedy[y], key=lambda w: w['x0'])
+                        teksty_wiersza = [w['text'] for w in wiersz_slowa]
+                        pelny_tekst_spacja = " ".join(teksty_wiersza)
                         
+                        # Wykrywanie kolumn na podstawie odstępów poziomu X
                         kolumny = []
                         aktualna_kolumna = []
-                        poprzedni_x1 = None
-                        GAP_THRESHOLD = 25
+                        ostatni_x1 = None
                         
-                        for x0, x1, tekst in wiersz_dane:
-                            if poprzedni_x1 is not None and (x0 - poprzedni_x1) > GAP_THRESHOLD:
+                        for slowo in wiersz_slowa:
+                            if ostatni_x1 is not None and (slowo['x0'] - ostatni_x1) > 15:
                                 if aktualna_kolumna:
                                     kolumny.append(" ".join(aktualna_kolumna))
                                     aktualna_kolumna = []
-                            aktualna_kolumna.append(tekst)
-                            poprzedni_x1 = x1
+                            aktualna_kolumna.append(slowo['text'])
+                            ostatni_x1 = slowo['x1']
                         if aktualna_kolumna:
                             kolumny.append(" ".join(aktualna_kolumna))
+                            
+                        sformatowany_wiersz = " || ".join(kolumny)
                         
-                        pelny_tekst_wiersza = " ".join([t for _, _, t in wiersz_dane])
-                        
-                        if "semestr / grupa" in pelny_tekst_wiersza.lower() or "8:00" in pelny_tekst_wiersza:
-                            aktualne_naglowki = [t for _, _, t in wiersz_dane]
+                        if "semestr / grupa" in pelny_tekst_spacja.lower() or "8:00" in pelny_tekst_spacja:
+                            aktualne_naglowki = teksty_wiersza
                             
-                        if "I" in pelny_tekst_wiersza and "Technik" in pelny_tekst_wiersza and ("masażysta_we" in pelny_tekst_wiersza or "masażysta" in pelny_tekst_wiersza):
-                            
-                            zajecia_kolumny = []
-                            for kol in kolumny:
-                                if "I Technik" not in kol:
-                                    czysty_tekst = kol.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip()
-                                    if czysty_tekst:
-                                        zajecia_kolumny.append(czysty_tekst)
-                            
-                            if not zajecia_kolumny:
-                                zajecia_tekst = pelny_tekst_wiersza.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip()
-                                zajecia_kolumny = [zajecia_tekst] if zajecia_tekst else []
+                        # Szukanie grupy
+                        if "I" in teksty_wiersza and "Technik" in teksty_wiersza and ("masażysta_we" in teksty_wiersza or "masażysta" in teksty_wiersza):
+                            zajecia_tekst = sformatowany_wiersz.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip(" |")
                             
                             if not aktualne_naglowki:
-                                aktualne_naglowki = ["Brak nagłówków (sprawdź oryginalny plik)"]
+                                aktualne_naglowki = ["Brak nagłówków"]
                                 
                             wyniki.append({
                                 "plik_url": url,
                                 "nazwa_pliku": os.path.basename(url),
                                 "strona": nr_strony + 1,
                                 "naglowki": " ".join(aktualne_naglowki),
-                                "zajecia": "<br>".join(zajecia_kolumny) if zajecia_kolumny else "Dzień wolny (brak przydzielonych zajęć/sal)"
+                                "zajecia": zajecia_tekst if zajecia_tekst else "Dzień wolny (brak przydzielonych zajęć/sal)"
                             })
         except Exception as e:
             print(f"Błąd przetwarzania PDF {nazwa_pliku_tymczasowa}: {e}")
 
-    return pdf_linki, wyniki
+    return wyniki
 
 def generuj_html():
-    _, wyniki = przetworz_pdfy()
+    wyniki = przetworz_pdfy()
     
     print("Generowanie pliku index.html...")
     
@@ -151,11 +144,11 @@ def generuj_html():
     <title>Plan Zajęć - I Technik masażysta_we</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f9; color: #333; }
-        h1, h2 { text-align: center; color: #2c3e50; }
-        .karta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #3498db; max-width: 800px; margin-left: auto; margin-right: auto; }
-        .karta-pusta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #e74c3c; text-align: center; max-width: 800px; margin-left: auto; margin-right: auto; }
-        .naglowek { font-size: 0.9em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
-        .zajecia { font-size: 1.1em; color: #2c3e50; font-weight: bold; margin-top: 5px; line-height: 1.5; }
+        h1 { text-align: center; color: #2c3e50; margin-bottom: 25px; }
+        .karta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #3498db; }
+        .karta-pusta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #e74c3c; text-align: center; }
+        .naglowek { font-size: 0.85em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
+        .zajecia { font-size: 1.05em; color: #2c3e50; font-weight: bold; line-height: 1.5; }
         .strona-info { font-size: 0.8em; color: #bdc3c7; margin-top: 10px; text-align: right; }
         a { color: #2980b9; text-decoration: none; }
         a:hover { text-decoration: underline; }
@@ -163,15 +156,13 @@ def generuj_html():
 </head>
 <body>
     <h1>Plan Zajęć: I Technik masażysta_we</h1>
-    
-    <h2 style="margin-top: 30px;">Wyniki wyszukiwania zajęć:</h2>
 """
 
     if wyniki:
         for wynik in wyniki:
             html += f"""    <div class="karta">
-        <div class="naglowek">Plik źródłowy: <a href="{wynik['plik_url']}" target="_blank">{wynik['nazwa_pliku']}</a><br>Wykryte godziny: {wynik['naglowki']}</div>
-        <div class="zajecia">Wykryte zajęcia/sale:<br>{wynik['zajecia']}</div>
+        <div class="naglowek">Plik źródłowy: <a href="{wynik['plik_url']}" target="_blank">{wynik['nazwa_pliku']}</a> | Wykryte godziny: {wynik['naglowki']}</div>
+        <div class="zajecia">{wynik['zajecia']}</div>
         <div class="strona-info">Znaleziono na stronie {wynik['strona']}</div>
     </div>
 """
