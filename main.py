@@ -16,27 +16,33 @@ def pobierz_linki_pdf():
     
     soup = BeautifulSoup(response.text, 'html.parser')
     
-    # Szukamy listy z plikami na podstawie struktury HTML sekcji plików
+    # Szukamy wszystkich tagów <a> na stronie
     elementy_a = soup.select("section.files ul.files-list li a")
+    if not elementy_a:
+        # Fallback gdyby selektor się zmienił
+        elementy_a = soup.find_all('a', href=True)
     
     pdf_linki = []
-    print("\n--- ZNALEZIONE LINKI W SEKCJI PLIKÓW ---")
+    print("\n--- ANALIZA ZNALEZIONYCH LINKÓW ---")
     for index, a in enumerate(elementy_a, 1):
         href = a.get('href')
         span_filename = a.find('span', class_='filename')
         nazwa_pliku_tekst = span_filename.text if span_filename else a.text
         
-        print(f"[{index}] Tytuł: {nazwa_pliku_tekst.strip()}")
-        print(f"    Link: {href}")
-        
         if href:
-            pdf_linki.append({
-                'url': href,
-                'tytul': nazwa_pliku_tekst.strip()
-            })
-    print("----------------------------------------\n")
-            
-    print(f"Łącznie zakwalifikowano {len(pdf_linki)} plików do sprawdzenia.")
+            # Filtrowanie linków zgodnie z wymaganiem: muszą zaczynać się od wskazanego URL i kończyć/zawierać .pdf
+            if href.startswith("https://teb.pl/wp-content/uploads/poznan/") and ".pdf" in href.lower():
+                print(f"[AKCEPTOWANY] [{index}] Tytuł: {nazwa_pliku_tekst.strip()}")
+                print(f"             Link: {href}")
+                pdf_linki.append({
+                    'url': href,
+                    'tytul': nazwa_pliku_tekst.strip()
+                })
+            else:
+                print(f"[ODRZUCONY]  [{index}] Link nie spełnia kryteriów: {href}")
+                
+    print(----------------------------------------\n)
+    print(f"Łącznie zakwalifikowano {len(pdf_linki)} plików PDF do sprawdzenia.")
     return pdf_linki
 
 def przetworz_pdf(url, tytul_dokumentu):
@@ -147,7 +153,7 @@ def generuj_html():
             html += f"            <li>📄 <a href=\"{item['url']}\" target=\"_blank\">{item['tytul']}</a> (<a href=\"{item['url']}\" target=\"_blank\" style=\"font-size:0.9em; color:#7f8c8d;\">Bezpośredni link do PDF</a>)</li>\n"
         html += "        </ul>\n"
     else:
-        html += "        <p>Nie znaleziono żadnych plików PDF w sekcji pobierania.</p>\n"
+        html += "        <p>Nie znaleziono żadnych pasujących plików PDF w sekcji pobierania.</p>\n"
 
     html += """    </div>
 
