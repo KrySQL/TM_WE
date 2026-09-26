@@ -20,70 +20,83 @@ def pobierz_linki_pdf():
     elementy_a = soup.select("section.files ul.files-list li a")
     
     pdf_linki = []
-    for a in elementy_a:
+    print("\n--- ZNALEZIONE LINKI W SEKCJI PLIKÓW ---")
+    for index, a in enumerate(elementy_a, 1):
         href = a.get('href')
         span_filename = a.find('span', class_='filename')
         nazwa_pliku_tekst = span_filename.text if span_filename else a.text
         
-        if href and href.endswith('.pdf'):
+        print(f"[{index}] Tytuł: {nazwa_pliku_tekst.strip()}")
+        print(f"    Link: {href}")
+        
+        if href:
             pdf_linki.append({
                 'url': href,
                 'tytul': nazwa_pliku_tekst.strip()
             })
+    print("----------------------------------------\n")
             
-    print(f"Znaleziono {len(pdf_linki)} plików PDF do pobrania.")
+    print(f"Łącznie zakwalifikowano {len(pdf_linki)} plików do sprawdzenia.")
     return pdf_linki
 
 def przetworz_pdf(url, tytul_dokumentu):
-    print(f"Pobieranie pliku: {tytul_dokumentu} ({url})...")
+    print(f"Pobieranie i przetwarzanie pliku: {tytul_dokumentu} ({url})...")
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
     }
-    response = requests.get(url, headers=headers)
+    
+    try:
+        response = requests.get(url, headers=headers)
+        response.raise_for_status()
+    except Exception as e:
+        print(f"Błąd pobierania pliku {url}: {e}")
+        return []
     
     nazwa_tymczasowa = "temp_plan.pdf"
     with open(nazwa_tymczasowa, "wb") as f:
         f.write(response.content)
         
-    print(f"Przeszukiwanie tekstu w dokumencie: {tytul_dokumentu}...")
     wyniki = []
     aktualne_naglowki = []
     TOLERANCJA_Y = 5 
 
-    with pdfplumber.open(nazwa_tymczasowa) as pdf:
-        for nr_strony, strona in enumerate(pdf.pages):
-            slowa = strona.extract_words()
-            
-            rzedy = {}
-            for slowo in slowa:
-                y = round(slowo['top'] / TOLERANCJA_Y) * TOLERANCJA_Y
-                tekst = slowo['text']
-                if y not in rzedy:
-                    rzedy[y] = []
-                rzedy[y].append(tekst)
+    try:
+        with pdfplumber.open(nazwa_tymczasowa) as pdf:
+            for nr_strony, strona in enumerate(pdf.pages):
+                slowa = strona.extract_words()
                 
-            posortowane_wysokosci = sorted(rzedy.keys())
-            
-            for y in posortowane_wysokosci:
-                wiersz = rzedy[y]
-                pelny_tekst = " ".join(wiersz)
+                rzedy = {}
+                for slowo in slowa:
+                    y = round(slowo['top'] / TOLERANCJA_Y) * TOLERANCJA_Y
+                    tekst = slowo['text']
+                    if y not in rzedy:
+                        rzedy[y] = []
+                    rzedy[y].append(tekst)
+                    
+                posortowane_wysokosci = sorted(rzedy.keys())
                 
-                if "semestr / grupa" in pelny_tekst.lower() or "8:00" in pelny_tekst:
-                    aktualne_naglowki = wiersz
+                for y in posortowane_wysokosci:
+                    wiersz = rzedy[y]
+                    pelny_tekst = " ".join(wiersz)
                     
-                if "I" in wiersz and "Technik" in wiersz and ("masażysta_we" in wiersz or "masażysta" in wiersz):
-                    zajecia_tekst = pelny_tekst.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip()
-                    
-                    if not aktualne_naglowki:
-                        aktualne_naglowki = ["Brak nagłówków (sprawdź oryginalny plik)"]
+                    if "semestr / grupa" in pelny_tekst.lower() or "8:00" in pelny_tekst:
+                        aktualne_naglowki = wiersz
                         
-                    wyniki.append({
-                        "dokument": tytul_dokumentu,
-                        "strona": nr_strony + 1,
-                        "naglowki": " ".join(aktualne_naglowki),
-                        "zajecia": zajecia_tekst if zajecia_tekst else "Dzień wolny (brak przydzielonych zajęć/sal)"
-                    })
-                    
+                    if "I" in wiersz and "Technik" in wiersz and ("masażysta_we" in wiersz or "masażysta" in wiersz):
+                        zajecia_tekst = pelny_tekst.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip()
+                        
+                        if not aktualne_naglowki:
+                            aktualne_naglowki = ["Brak nagłówków (sprawdź oryginalny plik)"]
+                            
+                        wyniki.append({
+                            "dokument": tytul_dokumentu,
+                            "strona": nr_strony + 1,
+                            "naglowki": " ".join(aktualne_naglowki),
+                            "zajecia": zajecia_tekst if zajecia_tekst else "Dzień wolny (brak przydzielonych zajęć/sal)"
+                        })
+    except Exception as e:
+        print(f"Błąd analizy PDF {tytul_dokumentu}: {e}")
+        
     if os.path.exists(nazwa_tymczasowa):
         os.remove(nazwa_tymczasowa)
         
@@ -94,11 +107,8 @@ def generuj_html():
     wszystkie_wyniki = []
 
     for item in pdf_linki:
-        try:
-            wyniki_pliku = przetworz_pdf(item['url'], item['tytul'])
-            wszystkie_wyniki.extend(wyniki_pliku)
-        except Exception as e:
-            print(f"Błąd podczas przetwarzania pliku {item['url']}: {e}")
+        wyniki_pliku = przetworz_pdf(item['url'], item['tytul'])
+        wszystkie_wyniki.extend(wyniki_pliku)
 
     print("Generowanie pliku index.html...")
     
