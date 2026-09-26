@@ -3,7 +3,7 @@ name: Aktualizuj Plan Zajęć
 on:
   workflow_dispatch: # Pozwala ręcznie odpalić skrypt z poziomu GitHuba
   schedule:
-    - cron: '0 6,18 * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00 (opcjonalnie)
+    - cron: '0 6,18 * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00
   push:
     branches:
       - main # Skrypt uruchomi się przy jakiejkolwiek edycji plików
@@ -27,10 +27,7 @@ jobs:
           python-version: '3.10'
 
       - name: Zainstaluj wymagane biblioteki
-        run: pip install requests pdfplumber
-
-      - name: Zainstaluj wymagane biblioteki
-        run: pip install requests pdfplumber beautifulsoup4
+        run: pip install requests pdfplumber beautifulsoup4 cloudscraper
 
       - name: Uruchom skrypt
         run: python main.py
