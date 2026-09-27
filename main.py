@@ -39,7 +39,7 @@ def pobierz_liste_pdfow():
         if pelny_url.startswith("https://teb.pl/wp-content/uploads/poznan/") and pelny_url.endswith(".pdf"):
             znalezione_linki.add(pelny_url)
 
-    lista_pdfow = sorted(list(znalezione_linki))
+    lista_pdfow = sorted(znalezione_linki)
     print(f"Znaleziono unikalnych plików PDF: {len(lista_pdfow)}")
     for link in lista_pdfow:
         print(f" -> {link}")
@@ -73,7 +73,7 @@ def przetworz_pdfy():
         
         try:
             with pdfplumber.open(nazwa_pliku_tymczasowa) as pdf:
-                for nr_strony, strona in enumerate(pdf.pages):
+                for strona in pdf.pages:
                     slowa = strona.extract_words()
                     
                     # Grupowanie słów w rzędy (oś Y)
@@ -85,12 +85,10 @@ def przetworz_pdfy():
                         rzedy[y].append(slowo)
                         
                     posortowane_wysokosci = sorted(rzedy.keys())
-                    aktualne_naglowki = []
                     
                     for y in posortowane_wysokosci:
                         wiersz_slowa = sorted(rzedy[y], key=lambda w: w['x0'])
                         teksty_wiersza = [w['text'] for w in wiersz_slowa]
-                        pelny_tekst_spacja = " ".join(teksty_wiersza)
                         
                         # Wykrywanie kolumn na podstawie odstępów poziomu X
                         kolumny = []
@@ -109,21 +107,13 @@ def przetworz_pdfy():
                             
                         sformatowany_wiersz = " || ".join(kolumny)
                         
-                        if "semestr / grupa" in pelny_tekst_spacja.lower() or "8:00" in pelny_tekst_spacja:
-                            aktualne_naglowki = teksty_wiersza
-                            
                         # Szukanie grupy
                         if "I" in teksty_wiersza and "Technik" in teksty_wiersza and ("masażysta_we" in teksty_wiersza or "masażysta" in teksty_wiersza):
                             zajecia_tekst = sformatowany_wiersz.replace("I Technik masażysta_we", "").replace("I Technik masażysta", "").strip(" |")
                             
-                            if not aktualne_naglowki:
-                                aktualne_naglowki = ["Brak nagłówków"]
-                                
                             wyniki.append({
                                 "plik_url": url,
                                 "nazwa_pliku": os.path.basename(url),
-                                "strona": nr_strony + 1,
-                                "naglowki": " ".join(aktualne_naglowki),
                                 "zajecia": zajecia_tekst if zajecia_tekst else "Dzień wolny (brak przydzielonych zajęć/sal)"
                             })
         except Exception as e:
@@ -149,9 +139,17 @@ def generuj_html():
         .karta-pusta { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 20px; margin-bottom: 20px; border-left: 5px solid #e74c3c; text-align: center; }
         .naglowek { font-size: 0.85em; color: #7f8c8d; margin-bottom: 10px; font-weight: bold; }
         .zajecia { font-size: 1.05em; color: #2c3e50; font-weight: bold; line-height: 1.5; }
-        .strona-info { font-size: 0.8em; color: #bdc3c7; margin-top: 10px; text-align: right; }
         a { color: #2980b9; text-decoration: none; }
         a:hover { text-decoration: underline; }
+
+        /* Style dla tabeli na dole strony */
+        .sekcja-tabela { background-color: #fff; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); padding: 25px; margin-top: 40px; border-top: 5px solid #2c3e50; }
+        .sekcja-tabela h2 { text-align: center; color: #2c3e50; margin-top: 0; margin-bottom: 20px; font-size: 1.3em; }
+        .tabela-info { width: 100%; border-collapse: collapse; margin-top: 10px; }
+        .tabela-info th, .tabela-info td { padding: 12px 15px; text-align: left; border-bottom: 1px solid #e0e0e0; }
+        .tabela-info th { background-color: #f8f9fa; color: #2c3e50; font-weight: bold; border-bottom: 2px solid #3498db; }
+        .tabela-info tr:hover { background-color: #f1f7fc; }
+        .tabela-info .data-col { font-weight: bold; color: #e67e22; width: 100px; white-space: nowrap; }
     </style>
 </head>
 <body>
@@ -161,13 +159,61 @@ def generuj_html():
     if wyniki:
         for wynik in wyniki:
             html += f"""    <div class="karta">
-        <div class="naglowek">Plik źródłowy: <a href="{wynik['plik_url']}" target="_blank">{wynik['nazwa_pliku']}</a> | Wykryte godziny: {wynik['naglowki']}</div>
+        <div class="naglowek">Plik źródłowy: <a href="{wynik['plik_url']}" target="_blank">{wynik['nazwa_pliku']}</a></div>
         <div class="zajecia">{wynik['zajecia']}</div>
-        <div class="strona-info">Znaleziono na stronie {wynik['strona']}</div>
     </div>
 """
     else:
         html += '    <div class="karta-pusta"><div class="zajecia">Nie znaleziono pasujących zajęć dla grupy „I Technik masażysta_we” w pobranym okresie.</div></div>\n'
+
+    # Tabela z najważniejszymi informacjami
+    html += """
+    <div class="sekcja-tabela">
+        <h2>Najważniejsze informacje i zaliczenia</h2>
+        <table class="tabela-info">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Informacje / Temat zajęć / Zaliczenia</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td class="data-col">03.10</td>
+                    <td>Zaliczenie BHP PPOŻ</td>
+                </tr>
+                <tr>
+                    <td class="data-col">04.10</td>
+                    <td>Zaliczenie grzbiet (6 godz.) + możliwa wejściówka z przeciwwskazań do masażu klasycznego</td>
+                </tr>
+                <tr>
+                    <td class="data-col">04.10</td>
+                    <td>Duża szansa na brak Anatomii i Fizjoterapii (chyba że będzie zastępstwo)</td>
+                </tr>
+                <tr>
+                    <td class="data-col">10.10</td>
+                    <td>Klatka, brzuch (6 godz.)</td>
+                </tr>
+                <tr>
+                    <td class="data-col">11.10</td>
+                    <td>KK, KD – Powtórka poprzez praktykę / karty pracy</td>
+                </tr>
+                <tr>
+                    <td class="data-col">17.10</td>
+                    <td>Zaliczenie klatka, szyja (2 godz.)</td>
+                </tr>
+                <tr>
+                    <td class="data-col">18.10</td>
+                    <td>Anatomia: test KK, KD</td>
+                </tr>
+                <tr>
+                    <td class="data-col">24.10</td>
+                    <td>Zaliczenie brzuch, MOS (2 godz.)</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+"""
 
     html += """</body>
 </html>"""
