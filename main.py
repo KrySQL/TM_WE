@@ -188,7 +188,7 @@ def generuj_html():
                 </tr>
                 <tr>
                     <td class="data-col">04.10</td>
-                    <td>Duża szansa na brak Anatomii i Fizjoterapii (chyba że będzie zastępstwo)</td>
+                    <td>Duża szansa na brak zajęć z Anatomii i Fizjoterapii (chyba że będzie zastępstwo)</td>
                 </tr>
                 <tr>
                     <td class="data-col">10.10</td>
@@ -196,7 +196,7 @@ def generuj_html():
                 </tr>
                 <tr>
                     <td class="data-col">11.10</td>
-                    <td>KK, KD – Powtórka poprzez praktykę / karty pracy</td>
+                    <td>KK: KD & KG – Powtórka poprzez praktykę / karty pracy</td>
                 </tr>
                 <tr>
                     <td class="data-col">17.10</td>
@@ -204,7 +204,7 @@ def generuj_html():
                 </tr>
                 <tr>
                     <td class="data-col">18.10</td>
-                    <td>Anatomia: test KK, KD</td>
+                    <td>Anatomia: test z KK: KD & KG</td>
                 </tr>
                 <tr>
                     <td class="data-col">24.10</td>
