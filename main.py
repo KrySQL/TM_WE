@@ -8,7 +8,7 @@ from playwright.sync_api import sync_playwright
 URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 
 def pobierz_liste_pdfow():
-    print("Uruchamianie przeglądarki Playwright w celu ominięcia Cloudflare...")
+    print("Uruchamianie przeglądarki Playwright w celu ominięcia Cloudflare... ;)")
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
