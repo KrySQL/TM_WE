@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plan zajęć grupy „I Technik masażysta_we” (TEB Edukacja Poznań) jako strona WWW. 
+Plan zajęć grupy „I Technik masażysta_we” (TEB Edukacja Poznań) jako strona WWW.
 
 Co godzinę (GitHub Actions):
   1. Chromium (Playwright) otwiera Strefę Słuchacza i czeka, aż Cloudflare przepuści,
@@ -46,9 +46,15 @@ NAZWA_GRUPY = "I Technik masażysta_we"
 # Nie łapie „I Technik masażysta” bez „_we”, „II Technik masażysta_we” ani „…masażysta_wd”.
 GRUPA_REGEX = re.compile(r"(?<!\w)I\s+Technik\s+masażysta(?:\s*_\s*|\s+)we(?!\w)", re.IGNORECASE)
 
-# Dowolna nazwa grupy w konwencji szkoły („II Technik masażysta_we”, „I Opiekun medyczny_we”).
-# Służy do odsiewania: komórka z nazwą innej grupy nigdy nie trafi do planu.
-RE_NAZWA_GRUPY = re.compile(r"[IVX]{1,4}\s+\w[\w .()/-]{1,80}?\s*_\s*[a-z]{1,4}", re.IGNORECASE)
+# Dowolna nazwa grupy w konwencji szkoły: „II Technik masażysta_we”, „I Technik elektroradiolog A”,
+# „I Opiekun medyczny”. Służy do odsiewania: komórka z nazwą innej grupy nigdy nie trafi do planu.
+_LITERY = "A-Za-ząćęłńóśźżĄĆĘŁŃÓŚŹŻ"
+RE_NAZWA_GRUPY = re.compile(
+    rf"[IVX]{{1,4}}\s+[A-ZĄĆĘŁŃÓŚŹŻ][{_LITERY}]+(?:\s+[{_LITERY}]+){{0,4}}(?:\s*_\s*[a-z]{{1,4}})?"
+)
+
+# Wpis z planu sal: „Tomiak D. / 27 - Piekary”, „Parnasowska S. / 01 prac. dent. A - Rynek”.
+RE_WPIS_SALI = re.compile(r"(\S.*?)\s*/\s*(\S.*?)\s*-\s*([A-ZĄĆĘŁŃÓŚŹŻ][\wąćęłńóśźż.]*)(?=\s|$)")
 
 KATALOG = Path(__file__).resolve().parent
 PLIK_WYJSCIOWY = KATALOG / "index.html"
@@ -87,6 +93,21 @@ def jest_nazwa_grupy(tekst: str) -> bool:
     return bool(RE_NAZWA_GRUPY.fullmatch(" ".join(tekst.split())))
 
 
+def linie_opisu(tresc: str) -> list[str]:
+    """
+    Tekst komórki → linie do wyświetlenia. Wpis z planu sal „Tomiak D. / 27 - Piekary”
+    zamienia na [„Tomiak D.”, „sala 27, Piekary”]; inny tekst zostawia linia po linii.
+    """
+    plaski = " ".join(tresc.split())
+    wpisy = RE_WPIS_SALI.findall(plaski)
+    if wpisy and not RE_WPIS_SALI.sub("", plaski).strip():
+        if len(wpisy) == 1:
+            kto, sala, gdzie = wpisy[0]
+            return [kto, f"sala {sala}, {gdzie}"]
+        return [", ".join(k for k, _, _ in wpisy)] + [f"{k}: sala {sl}, {g}" for k, sl, g in wpisy]
+    return tresc.split("\n")
+
+
 def nazwa_pliku(url: str) -> str:
     return unquote(Path(urlparse(url).path).name)
 
@@ -118,6 +139,40 @@ RE_DATA_SLOWNIE = re.compile(
     + "|".join(sorted(_NUMER_MIESIACA, key=len, reverse=True))
     + r")[\s\-_.,]+(20\d{2})(?!\d)"
 )
+RE_DATA_DM = re.compile(r"(?<![\d.])(\d{1,2})[.\-_](\d{1,2})(?![\d])")
+
+_NUMER_DNIA = {}
+for _i, _nazwa in enumerate(DNI):
+    _NUMER_DNIA[_nazwa] = _i
+    _NUMER_DNIA[_bez_ogonkow(_nazwa)] = _i
+RE_DZIEN_TYGODNIA = re.compile(r"(?<!\w)(" + "|".join(sorted(_NUMER_DNIA, key=len, reverse=True)) + r")(?!\w)")
+
+
+def dzien_tygodnia(tekst: str | None) -> int | None:
+    """Pierwsza nazwa dnia tygodnia w tekście (0 = poniedziałek) albo None."""
+    m = RE_DZIEN_TYGODNIA.search(unicodedata.normalize("NFC", tekst or "").lower())
+    return _NUMER_DNIA[m[1]] if m else None
+
+
+def data_bez_roku(tekst: str | None, dzis: date, dzien_tyg: int | None = None) -> date | None:
+    """
+    „25.09” (np. z nazwy pliku) → pełna data. Rok: najbliższy dzisiejszej dacie, a jeśli w PDF
+    jest nazwa dnia tygodnia („piątek”), wybierany jest rok, w którym ten dzień się zgadza.
+    """
+    for m in RE_DATA_DM.finditer(tekst or ""):
+        kandydaci = []
+        for rok in (dzis.year - 1, dzis.year, dzis.year + 1):
+            try:
+                kandydaci.append(date(rok, int(m[2]), int(m[1])))
+            except ValueError:
+                pass
+        if dzien_tyg is not None:
+            kandydaci = [k for k in kandydaci if k.weekday() == dzien_tyg] or kandydaci
+        if kandydaci:
+            return min(kandydaci, key=lambda k: abs((k - dzis).days))
+    return None
+
+
 RE_GODZINA = re.compile(r"(?<!\d)([01]?\d|2[0-3])[:.]([0-5]\d)(?!\d)")
 
 
@@ -299,7 +354,7 @@ def _scal(wartosci, tolerancja=1.5) -> list[float]:
     return wynik
 
 
-def _zloz_linie(slowa: list[dict], tolerancja=3) -> list[list[dict]]:
+def _zloz_linie(slowa: list[dict], tolerancja=2) -> list[list[dict]]:
     """Grupuje słowa w linie (klastrowanie po osi Y – bez „przeskakiwania” na granicy zaokrąglenia)."""
     linie: list[list] = []
     for w in sorted(slowa, key=lambda w: (w["top"], w["x0"])):
@@ -308,6 +363,43 @@ def _zloz_linie(slowa: list[dict], tolerancja=3) -> list[list[dict]]:
         else:
             linie.append([w["top"], [w]])
     return [sorted(linia, key=lambda w: w["x0"]) for _, linia in linie]
+
+
+def _obrocony(znak: dict) -> bool:
+    """Znak obrócony o 90° (np. pionowe godziny w nagłówku planu sal)."""
+    m = znak.get("matrix")
+    return bool(m) and abs(m[1]) > 0.5 and abs(m[0]) < 0.5
+
+
+def _slowa_obrocone(znaki: list[dict]) -> list[dict]:
+    """
+    Tekst pionowy → „słowa” jak dla zwykłego tekstu. Bez tego pdfplumber zwraca każdy znak
+    pionowego „17:35-18:20” jako osobne słowo, w dodatku od końca („0”, „2”, „:”, „8”…).
+    """
+    pionowe: list[list[dict]] = []
+    for z in sorted((z for z in znaki if _obrocony(z)), key=lambda z: (round(z["x0"]), z["top"])):
+        if pionowe and abs(z["x0"] - pionowe[-1][0]["x0"]) <= 1.5:
+            pionowe[-1].append(z)
+        else:
+            pionowe.append([z])
+    slowa = []
+    for grupa in pionowe:
+        od_dolu = grupa[0]["matrix"][1] > 0          # obrót w lewo: czytamy od dołu do góry
+        grupa.sort(key=lambda z: -z["top"] if od_dolu else z["top"])
+        fragmenty: list[list[dict]] = []
+        for z in grupa:                               # przerwa w pionie = inne słowo / inna komórka
+            if fragmenty:
+                p_ = fragmenty[-1][-1]
+                if max(z["top"] - p_["bottom"], p_["top"] - z["bottom"]) <= 2:
+                    fragmenty[-1].append(z)
+                    continue
+            fragmenty.append([z])
+        for f in fragmenty:
+            tekst = normalizuj("".join(z["text"] for z in f))
+            if tekst:
+                slowa.append({"text": tekst, "x0": min(z["x0"] for z in f), "x1": max(z["x1"] for z in f),
+                              "top": min(z["top"] for z in f), "bottom": max(z["bottom"] for z in f)})
+    return slowa
 
 
 def _tekst_slow(slowa: list[dict]) -> str:
@@ -336,11 +428,11 @@ def _bloki(pozycje: list[tuple], tekst) -> list[Blok]:
     wynik = []
     for b in bloki:
         kolumny = list(dict.fromkeys(b["kolumny"]))  # jedna komórka z godziną = jedna lekcja
-        wynik.append(Blok(zakres_godzin([et for _, et in kolumny]), b["tresc"].split("\n"), len(kolumny)))
+        wynik.append(Blok(zakres_godzin([et for _, et in kolumny]), linie_opisu(b["tresc"]), len(kolumny)))
     return wynik
 
 
-def grupa_z_tabeli(tabela, slowa: list[dict]) -> list[tuple[str, list[Blok]]]:
+def grupa_z_tabeli(tabela, slowa: list[dict], pamiec: dict | None = None) -> list[tuple[str, list[Blok]]]:
     """
     Szuka grupy w tabeli z liniami siatki i zwraca [(opis trafienia, bloki)].
     Obsługuje dwa układy planu:
@@ -403,8 +495,6 @@ def grupa_z_tabeli(tabela, slowa: list[dict]) -> list[tuple[str, list[Blok]]]:
         return _bloki(pozycje, tekst)
 
     # ── układ „grupy w wierszach” ──
-    naglowek: int | None | bool = False  # False = jeszcze nie szukano
-
     def wiersz_naglowka() -> int | None:
         """Wiersz z największą liczbą godzin (8:00-8:45); zapasowo – numery lekcji 1, 2, 3…"""
         najlepszy, indeks = 0, None
@@ -419,19 +509,35 @@ def grupa_z_tabeli(tabela, slowa: list[dict]) -> list[tuple[str, list[Blok]]]:
                 return r
         return None
 
+    # Tabela na kolejnej stronie PDF zwykle nie ma własnego nagłówka z godzinami –
+    # wtedy bierzemy godziny zapamiętane z poprzedniej tabeli (dopasowanie po położeniu kolumn).
+    naglowek = wiersz_naglowka()
+    pamiec = pamiec if pamiec is not None else {}
+    if naglowek is not None:
+        pamiec["kolumny"] = [(srodki_x[k], siatka[naglowek][k], tekst(siatka[naglowek][k]).replace("\n", " "))
+                             for k in range(liczba_kolumn)]
+    zapamietane = pamiec.get("kolumny", []) if naglowek is None else []
+
+    def naglowek_kolumny(k):
+        """(identyfikator komórki nagłówka, etykieta godzin) dla kolumny k."""
+        if naglowek is not None:
+            c = siatka[naglowek][k]
+            return (c or k), tekst(c).replace("\n", " ")
+        if zapamietane:
+            x, c, etykieta = min(zapamietane, key=lambda z: abs(z[0] - srodki_x[k]))
+            if abs(x - srodki_x[k]) <= 4:
+                return (c or ("pamięć", x)), etykieta
+        return k, ""
+
     def z_wiersza(wiersz, kom_nazwy, koniec) -> list[Blok]:
-        nonlocal naglowek
-        if naglowek is False:
-            naglowek = wiersz_naglowka()
         # Pasmo = wiersze siatki zajmowane przez komórkę z nazwą (grupa może mieć „podwiersze”).
         pasmo = [i for i, y in enumerate(srodki_y) if kom_nazwy[1] <= y <= kom_nazwy[3]]
         pozycje = []
         for k in range(koniec + 1, liczba_kolumn):
-            kom_nagl = siatka[naglowek][k] if naglowek is not None else None
-            etykieta = tekst(kom_nagl).replace("\n", " ")
-            if naglowek is not None and etykieta and not RE_GODZINA.search(etykieta) and not etykieta.isdigit():
+            id_nagl, etykieta = naglowek_kolumny(k)
+            if etykieta and not RE_GODZINA.search(etykieta) and not etykieta.isdigit():
                 continue  # kolumny typu „Uwagi”, „Suma godzin”
-            pozycje.append((kom_nagl or k, etykieta, tuple(unikalne(siatka[i][k] for i in pasmo))))
+            pozycje.append((id_nagl, etykieta, tuple(unikalne(siatka[i][k] for i in pasmo))))
         return _bloki(pozycje, tekst)
 
     wyniki: list[tuple[str, list[Blok]]] = []
@@ -487,9 +593,11 @@ def grupa_z_tekstu(slowa: list[dict]) -> list[tuple[str, list[Blok]]]:
 
     linie = _zloz_linie(slowa, tolerancja=4)
     naglowek = max(linie, key=lambda l: sum(bool(RE_GODZINA.search(w["text"])) for w in l), default=[])
-    kol_nagl = [k for k in kolumny(naglowek) if RE_GODZINA.search(tekst(k))]
+    kol_nagl = [k for k in kolumny(naglowek, przerwa=4) if RE_GODZINA.search(tekst(k))]
     if len(kol_nagl) < 2:
         kol_nagl = []
+    srodki_nagl = [srodek(k) for k in kol_nagl]
+    etykiety_nagl = [tekst(k) for k in kol_nagl]
 
     wyniki = []
     for nr, linia in enumerate(linie):
@@ -528,25 +636,55 @@ def grupa_z_tekstu(slowa: list[dict]) -> list[tuple[str, list[Blok]]]:
                             for b in bloki]))
             continue
 
-        # Układ „grupy w wierszach”
-        bloki = []
-        for kol in kol_linii:
-            tresc = GRUPA_REGEX.sub("", tekst(kol)).strip(" |_")
+        # Układ „grupy w wierszach”. Zamiast jednej linii tekstu bierzemy całe PASMO wiersza
+        # (od połowy odległości do grupy wyżej do połowy odległości do grupy niżej), więc wpisy
+        # złamane na dwie linie („… / 01 prac. dent. A -” ↵ „Rynek”) nie giną.
+        nazwa = kol_linii[nasza]
+        y_nazwy = (nazwa[0]["top"] + nazwa[0]["bottom"]) / 2
+        # Nazwy grup stoją w jednej kolumnie → wiersze to linie zaczynające się w tym samym miejscu.
+        y_wierszy = sorted({round((l[0]["top"] + l[0]["bottom"]) / 2, 1) for l in linie
+                            if abs(l[0]["x0"] - nazwa[0]["x0"]) <= 4})
+        wyzej = [y for y in y_wierszy if y < y_nazwy - 1]
+        nizej = [y for y in y_wierszy if y > y_nazwy + 1]
+        gora = (wyzej[-1] + y_nazwy) / 2 if wyzej else y_nazwy - 12
+        dol = (nizej[0] + y_nazwy) / 2 if nizej else y_nazwy + 12
+        prawa_nazwy = max(w["x1"] for w in nazwa)
+        w_pasmie = [w for w in slowa
+                    if gora <= (w["top"] + w["bottom"]) / 2 <= dol and w["x0"] > prawa_nazwy + 2]
+
+        # Komórki: fragmenty linii złączone w pionie, jeśli nachodzą na siebie w poziomie.
+        fragmenty = [f for l in _zloz_linie(w_pasmie) for f in kolumny(l, przerwa=6)]
+        komorki_tekstu: list[dict] = []
+        for f in sorted(fragmenty, key=lambda f: f[0]["x0"]):
+            x0, x1 = f[0]["x0"], f[-1]["x1"]
+            for k in komorki_tekstu:
+                if x0 < k["x1"] and x1 > k["x0"]:
+                    k["slowa"] += f
+                    k["x0"], k["x1"] = min(k["x0"], x0), max(k["x1"], x1)
+                    break
+            else:
+                komorki_tekstu.append({"x0": x0, "x1": x1, "slowa": list(f)})
+
+        bloki: list[dict] = []
+        for k in sorted(komorki_tekstu, key=lambda k: k["x0"]):
+            tresc = GRUPA_REGEX.sub("", _tekst_slow(k["slowa"])).strip(" |_\n")
             if not tresc or jest_nazwa_grupy(tresc):
                 continue
-            indeks, etykieta = None, ""
+            indeksy: list[int] = []
             if kol_nagl:
-                indeks = min(range(len(kol_nagl)), key=lambda i: abs(srodek(kol_nagl[i]) - srodek(kol)))
-                etykieta = tekst(kol_nagl[indeks])
+                indeksy = [i for i, c in enumerate(srodki_nagl) if k["x0"] - 4 <= c <= k["x1"] + 4]
+                if not indeksy:
+                    indeksy = [min(range(len(srodki_nagl)), key=lambda i: abs(srodki_nagl[i] - (k["x0"] + k["x1"]) / 2))]
             poprzedni = bloki[-1] if bloki else None
-            # Ten sam przedmiot w sąsiednich godzinach → jeden blok (np. 8:00–9:35)
-            if poprzedni and indeks is not None and poprzedni["tresc"] == tresc and poprzedni["indeks"] == indeks - 1:
-                poprzedni["etykiety"].append(etykieta)
-                poprzedni["indeks"] = indeks
+            # Ten sam wpis w sąsiednich godzinach → jeden blok
+            if poprzedni and indeksy and poprzedni["indeksy"] and poprzedni["tresc"] == tresc \
+                    and indeksy[0] == poprzedni["indeksy"][-1] + 1:
+                poprzedni["indeksy"] += indeksy
             else:
-                bloki.append({"tresc": tresc, "indeks": indeks, "etykiety": [etykieta]})
-        wyniki.append((f"{tekst(kol_linii[nasza])} (grupy w wierszach, bez linii tabeli)",
-                       [Blok(zakres_godzin(b["etykiety"]), [b["tresc"]], len(b["etykiety"])) for b in bloki]))
+                bloki.append({"tresc": tresc, "indeksy": indeksy})
+        wyniki.append((f"{tekst(nazwa)} (grupy w wierszach, bez linii tabeli)",
+                       [Blok(zakres_godzin([etykiety_nagl[i] for i in b["indeksy"]]), linie_opisu(b["tresc"]),
+                             max(1, len(b["indeksy"]))) for b in bloki]))
     return wyniki
 
 
@@ -564,13 +702,24 @@ def data_nad_tabela(strona, tabela) -> date | None:
 
 
 def analizuj_pdf(plik: dict) -> list[Dzien]:
-    data_pliku = next(iter(znajdz_daty(plik["etykieta"]) + znajdz_daty(plik["nazwa"])), None)
     ostatnia_data: date | None = None
     dni: list[Dzien] = []
+    dzis = datetime.now(STREFA).date()
+    pamiec_naglowka: dict = {}  # godziny z nagłówka – dla tabel na kolejnych stronach
 
     with pdfplumber.open(io.BytesIO(plik["dane"])) as pdf:
+        # Data pliku: pełna data z tekstu linku / nazwy pliku, a jeśli jest bez roku
+        # („plan-salek-25.09.pdf”) – rok dobrany do dnia tygodnia wpisanego w PDF („piątek”).
+        dzien_tyg = dzien_tygodnia(pdf.pages[0].extract_text() if pdf.pages else "")
+        data_pliku = (next(iter(znajdz_daty(plik["etykieta"]) + znajdz_daty(plik["nazwa"])), None)
+                      or data_bez_roku(plik["etykieta"], dzis, dzien_tyg)
+                      or data_bez_roku(Path(plik["nazwa"]).stem, dzis, dzien_tyg))
         for nr_strony, strona in enumerate(pdf.pages, 1):
-            slowa = [dict(w, text=normalizuj(w["text"])) for w in strona.extract_words()]
+            # y_tolerance=1: domyślne 3 pt „łańcuchowo” skleja linie komórek wyśrodkowanych w pionie
+            # z dwuliniowymi wpisami obok – litery z dwóch linii mieszały się („Parna s o w s k a”).
+            poziome = strona.filter(lambda o: not (o.get("object_type") == "char" and _obrocony(o)))
+            slowa = [dict(w, text=normalizuj(w["text"])) for w in poziome.extract_words(y_tolerance=1)]
+            slowa += _slowa_obrocone(strona.chars)
             daty_strony = znajdz_daty(strona.extract_text())
             trafienia: list[tuple[date | None, str, list[Blok]]] = []
 
@@ -580,7 +729,7 @@ def analizuj_pdf(plik: dict) -> list[Dzien]:
                 data = (data_nad_tabela(strona, tabela) or ostatnia_data or data_pliku
                         or (daty_strony[0] if daty_strony else None))
                 ostatnia_data = data or ostatnia_data
-                trafienia += [(data, opis, bloki) for opis, bloki in grupa_z_tabeli(tabela, slowa)]
+                trafienia += [(data, opis, bloki) for opis, bloki in grupa_z_tabeli(tabela, slowa, pamiec_naglowka)]
 
             if not trafienia:
                 data = ((daty_strony[0] if daty_strony else None) or ostatnia_data or data_pliku)
@@ -615,15 +764,19 @@ PRIORYTET = {"zaliczenie": 0, "test": 1, "zajecia": 2, "info": 3}
 
 
 def wczytaj_terminy(dzis: date) -> list[dict]:
-    if not PLIK_TERMINOW.exists():
+    # Na serwerach GitHuba (Linux) „Terminy.json” ≠ „terminy.json” – szukamy bez względu na wielkość liter.
+    plik = next((x for x in KATALOG.iterdir() if x.is_file() and x.name.lower() == PLIK_TERMINOW.name), None)
+    if plik is None:
+        ostrzezenie(f"Brak pliku {PLIK_TERMINOW.name} obok {Path(__file__).name} – sekcja terminów będzie pusta.")
         return []
     wynik = []
-    for poz in json.loads(PLIK_TERMINOW.read_text(encoding="utf-8")):
+    for poz in json.loads(plik.read_text(encoding="utf-8-sig")):
         typ = poz.get("typ", "info")
         if typ not in TYPY_TERMINOW:
             raise ValueError(f"terminy.json: nieznany typ {typ!r} – dozwolone: {', '.join(TYPY_TERMINOW)}")
         wynik.append({"data": data_terminu(poz["data"], dzis).isoformat(), "typ": typ,
                       "opis": str(poz["opis"]).strip()})
+    log(f"Terminy: wczytano {len(wynik)} z pliku {plik.name}")
     return sorted(wynik, key=lambda t: t["data"])  # sortowanie stabilne: kolejność w dniu zostaje
 
 
