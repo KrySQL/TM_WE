@@ -1,12 +1,12 @@
 name: Aktualizuj Plan Zajęć
 
 on:
-  workflow_dispatch: # Pozwala ręcznie odpalić skrypt z poziomu GitHuba
+  workflow_dispatch:          # ręczne uruchomienie z zakładki Actions
   schedule:
-    - cron: '0 * * * *' # Skrypt będzie działał automatycznie o 6:00 i 18:00
+    - cron: "7 * * * *"       # co godzinę, w 7. minucie (o pełnych godzinach GitHub mocno opóźnia start)
   push:
     branches:
-      - main # Skrypt uruchomi się przy jakiejkolwiek edycji plików
+      - main                  # każda zmiana w repo (np. w terminy.json) od razu odświeża stronę
 
 # Uprawnienia wymagane przez mechanizm GitHub Pages
 permissions:
@@ -14,34 +14,69 @@ permissions:
   pages: write
   id-token: write
 
+# Nigdy dwa wdrożenia naraz; rozpoczęte wdrożenie zawsze się dokończy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - name: Pobierz kod repozytorium
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Skonfiguruj Pythona
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.10'
-        
+          python-version: "3.12"
+
       - name: Zainstaluj wymagane biblioteki
         run: |
-          pip install requests pdfplumber beautifulsoup4 playwright cloudscraper
-          playwright install chromium
-          
+          pip install requests pdfplumber beautifulsoup4 playwright
+          python -m playwright install --with-deps chromium
+
+      # Gdy strona szkoły nie odpowie (np. blokada Cloudflare), skrypt kończy się błędem,
+      # kolejne kroki się nie wykonują, a na stronie zostaje ostatni poprawny plan.
       - name: Uruchom skrypt
         run: python main.py
 
+      # Publikujemy tylko gotową stronę, a nie całe repozytorium z kodem.
+      - name: Przygotuj stronę do publikacji
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+
       - name: Skonfiguruj GitHub Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v5
 
       - name: Wgraj plik (Artifact)
         uses: actions/upload-pages-artifact@v3
         with:
-          path: '.'
+          path: _site
 
       - name: Wdróż na stronę GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  # GitHub wyłącza harmonogram (cron) w publicznym repo po 60 dniach bez aktywności.
+  # Ten krok co godzinę „odświeża” workflow przez API, więc strona nie przestanie się
+  # aktualizować w środku semestru. Bez commitów i bez dodatkowych tokenów.
+  keepalive:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Odnów harmonogram
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq .workflow_id)
+          gh api -X PUT "repos/${{ github.repository }}/actions/workflows/$id/enable"
+          echo "Harmonogram odnowiony (workflow $id)."
