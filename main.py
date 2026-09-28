@@ -1096,7 +1096,7 @@ def renderuj(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str],
 
   <footer class="stopka">
     <p>Plan pochodzi z plików PDF w <a href="{URL_STRONY}">Strefie Słuchacza TEB Poznań</a>. Strona sprawdza je co godzinę, ostatnia aktualizacja: {kiedy}.</p>
-    <p>Przy rozbieżnościach obowiązuje plan opublikowany przez szkołę.</p>
+    <p><a href="https://github.com/KrySQL/TM_WE/">Repozytorium</a></p>
   </footer>
 </main>
 <script>{JS}</script>
