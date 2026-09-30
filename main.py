@@ -6,12 +6,15 @@ Co godzinę (GitHub Actions):
   1. Chromium (Playwright) otwiera Strefę Słuchacza i czeka, aż Cloudflare przepuści,
   2. zbiera linki do PDF-ów i pobiera je w tej samej sesji przeglądarki,
   3. z tabel w PDF wyciąga wiersz grupy: godziny, przedmiot, prowadzący, sala,
-  4. zapisuje index.html, który workflow publikuje na GitHub Pages.
+  4. pobiera plan semestralny z EduPage (sp-teb-poznan.edupage.org): dokleja nazwy przedmiotów
+     do bloków z planu sal i pokazuje zjazdy, dla których szkoła nie wrzuciła jeszcze PDF-a,
+  5. zapisuje index.html, który workflow publikuje na GitHub Pages.
 
 Gdy strona szkoły nie odpowiada, skrypt kończy się kodem 1 – workflow niczego
 nie wdraża i na stronie zostaje ostatni poprawny plan.
 
 Test lokalny bez przeglądarki:  python main.py --pdf plan1.pdf plan2.pdf
+  … z zapisaną odpowiedzią EduPage:  python main.py --pdf plan.pdf --edupage-json regulartt.json
 """
 from __future__ import annotations
 
@@ -26,8 +29,8 @@ import sys
 import time
 import traceback
 import unicodedata
-from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from dataclasses import asdict, dataclass, replace
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 from zoneinfo import ZoneInfo
@@ -41,6 +44,13 @@ from bs4 import BeautifulSoup
 URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 PREFIKS_PDF = "/wp-content/uploads/poznan/"
 NAZWA_GRUPY = "I Technik masażysta_we"
+
+# Plan semestralny w EduPage – ten sam, który widać pod
+# https://sp-teb-poznan.edupage.org/timetable/view.php?num=9&class=-18
+EDUPAGE_URL = "https://sp-teb-poznan.edupage.org"
+EDUPAGE_NUM = os.environ.get("EDUPAGE_NUM", "9")            # num=… z linku (zmienia się z nową wersją planu)
+EDUPAGE_KLASA = os.environ.get("EDUPAGE_KLASA", "1TM_we")   # nazwa klasy w EduPage (w linku class=-18)
+EDUPAGE_DNI_NAPRZOD = 35                                    # dni tylko z EduPage: tyle dni do przodu
 
 # TYLKO „I Technik masażysta_we” (także gdy nazwa jest złamana w komórce na dwie linie).
 # Nie łapie „I Technik masażysta” bez „_we”, „II Technik masażysta_we” ani „…masażysta_wd”.
@@ -244,6 +254,8 @@ class Dzien:
     plik_url: str
     plik_nazwa: str
     etykieta: str       # tekst linku ze strony szkoły / nazwa pliku
+    zrodlo: str = "pdf"     # "pdf", "pdf+edupage" (przedmioty z EduPage) albo "edupage" (brak PDF-a)
+    edupage_url: str = ""   # link do planu klasy w EduPage
 
 
 # ═══════════════════════════ POBIERANIE ═══════════════════════════
@@ -757,6 +769,291 @@ def uporzadkuj(dni: list[Dzien]) -> list[Dzien]:
     return sorted(wynik, key=lambda d: (d.data is None, d.data or "", d.plik_nazwa))
 
 
+# ═══════════════════════════ EDUPAGE (plan semestralny) ═══════════════════════════
+#
+# Przeglądarka planu EduPage przy otwarciu wysyła JEDNO zapytanie regularttGetData i dostaje cały
+# plan na semestr (wszystkie tygodnie); strzałki tylko przełączają widok lokalnie. Wysyłamy to samo.
+#
+# Po co: plan sal z PDF podaje prowadzącego i salę, ale nie przedmiot – EduPage go dokleja. Dni, dla
+# których szkoła nie wrzuciła jeszcze PDF-a, pokazujemy z EduPage (z uwagą, że sale mogą się zmienić).
+# EduPage to źródło pomocnicze: gdy nie odpowie, strona powstaje jak dotąd z samych PDF-ów.
+
+# Zakres dat w nazwie tygodnia: „5: 28.09 - 4.10”. Zakres z rokiem („31.08.2026-31.01.2027”) nie pasuje.
+RE_ZAKRES_TYGODNIA = re.compile(r"(?<![\d.])(\d{1,2})\.(\d{1,2})\.?\s*[-–]\s*(\d{1,2})\.(\d{1,2})\.?(?!\d|\.\d)")
+# Prowadzący w formacie planu sal: „Kobyłka U.”, „Barczak-Ciupak M.”, „Karwaszewski R.E.”
+RE_NAUCZYCIEL = re.compile(r"^\s*([^\W\d_][\w\-]*)\s+(?:[^\W\d_]\.\s*)+$")
+SKROTY_DNI = {"pn": 0, "pon": 0, "wt": 1, "sr": 2, "sro": 2, "cz": 3, "czw": 3, "pt": 4, "pia": 4,
+              "so": 5, "sb": 5, "sob": 5, "n": 6, "nd": 6, "nie": 6}
+
+
+@dataclass
+class ZajeciaEdu:
+    data: str               # ISO
+    p1: int                 # pierwsza i ostatnia godzina lekcyjna
+    p2: int
+    od: int | None          # minuty od północy
+    do: int | None
+    przedmiot: str
+    nauczyciele: list[str]
+    sale: list[str]
+    grupa: str
+
+
+def _klucz(tekst: str | None) -> str:
+    return _bez_ogonkow(normalizuj(tekst)).lower()
+
+
+def _minuty(tekst) -> int | None:
+    m = RE_GODZINA.search(str(tekst or ""))
+    return int(m[1]) * 60 + int(m[2]) if m else None
+
+
+def _hhmm(minuty: int) -> str:
+    return f"{minuty // 60}:{minuty % 60:02d}"
+
+
+def _wez(kontener, klucz):
+    """Element po id („3”) – EduPage trzyma perioddata/daydata raz jako słownik, raz jako listę."""
+    if isinstance(kontener, dict):
+        return kontener.get(str(klucz))
+    if isinstance(kontener, list) and str(klucz).isdigit() and int(klucz) < len(kontener):
+        return kontener[int(klucz)]
+    return None
+
+
+def _tabele_edupage(odp) -> dict[str, list[dict]]:
+    """Odpowiedź regularttGetData → {nazwa tabeli: wiersze}. Szukamy listy [{id, data_rows}, …]."""
+    def szukaj(o, glebokosc=0):
+        if glebokosc > 6:
+            return None
+        if isinstance(o, list) and o and all(isinstance(t, dict) and isinstance(t.get("id"), str)
+                                             and isinstance(t.get("data_rows"), list) for t in o):
+            return o
+        dzieci = o.values() if isinstance(o, dict) else o if isinstance(o, list) else []
+        for dziecko in dzieci:
+            if isinstance(dziecko, (dict, list)) and (wynik := szukaj(dziecko, glebokosc + 1)) is not None:
+                return wynik
+        return None
+
+    tabele = szukaj(odp)
+    if tabele is None:
+        klucze = list(odp)[:10] if isinstance(odp, dict) else type(odp).__name__
+        raise ValueError(f"w odpowiedzi nie ma tabel planu (klucze: {klucze})")
+    return {t["id"]: t["data_rows"] for t in tabele}
+
+
+def pobierz_edupage() -> dict:
+    """To samo zapytanie, które wysyła przeglądarka planu EduPage przy otwarciu strony."""
+    sesja = requests.Session()
+    sesja.headers["User-Agent"] = USER_AGENT_WZOR.format(wersja="140.0.0.0")
+    strona = sesja.get(f"{EDUPAGE_URL}/timetable/view.php?num={EDUPAGE_NUM}", timeout=30)  # ciasteczka sesji
+    m = re.search(r"gsechash[\"']?\s*[:=]\s*[\"']([0-9a-f]+)[\"']", strona.text)
+    odp = sesja.post(
+        f"{EDUPAGE_URL}/timetable/server/regulartt.js?__func=regularttGetData",
+        json={"__args": [None, EDUPAGE_NUM], "__gsh": m[1] if m else "00000000"},
+        timeout=60,
+    )
+    odp.raise_for_status()
+    return odp.json()
+
+
+def _nazwa(wiersz: dict | None) -> str:
+    return normalizuj((wiersz or {}).get("name") or (wiersz or {}).get("short") or "")
+
+
+def _nauczyciel(wiersz: dict | None) -> str:
+    """Jak w planie sal: „Kobyłka U.”; gdy EduPage ukrywa nazwiska – to, co udostępnia (np. skrót)."""
+    nazwisko = normalizuj((wiersz or {}).get("lastname"))
+    imie = normalizuj((wiersz or {}).get("firstname"))
+    if nazwisko:
+        return f"{nazwisko} {imie[0]}." if imie else nazwisko
+    return _nazwa(wiersz)
+
+
+def _dzien_tygodnia_edu(wiersz: dict) -> int | None:
+    for tekst in (wiersz.get("name"), wiersz.get("short")):
+        if (nr := dzien_tygodnia(tekst)) is not None:
+            return nr
+        skrot = _klucz(tekst).rstrip(".")
+        if skrot in SKROTY_DNI:
+            return SKROTY_DNI[skrot]
+    return None
+
+
+def _czas(wg_id: dict, okres: int, dzien_id: str, dzwonki) -> tuple[int | None, int | None]:
+    """Godziny lekcji jak w wydruku EduPage: okres → dzwonki klasy/lekcji → godziny w danym dniu."""
+    wiersz = wg_id.get("periods", {}).get(str(okres))
+    if not wiersz:
+        return None, None
+    od, do = wiersz.get("starttime"), wiersz.get("endtime")
+    wg_dzwonkow = None
+    if dzwonki and str(dzwonki) != "0":
+        wg_dzwonkow = _wez((wg_id.get("bells", {}).get(str(dzwonki)) or {}).get("perioddata"), okres)
+        if wg_dzwonkow:
+            od, do = wg_dzwonkow.get("starttime") or od, wg_dzwonkow.get("endtime") or do
+    w_dniu = _wez((wg_dzwonkow or {}).get("daydata") or wiersz.get("daydata"), dzien_id)
+    if w_dniu:
+        od, do = w_dniu.get("starttime") or od, w_dniu.get("endtime") or do
+    return _minuty(od), _minuty(do)
+
+
+def zajecia_edupage(odp: dict, dzis: date) -> tuple[list[ZajeciaEdu], str]:
+    """Wszystkie zajęcia klasy EDUPAGE_KLASA z planu semestralnego: każdy tydzień, każdy dzień."""
+    T = _tabele_edupage(odp)
+    wg_id = {nazwa: {str(w.get("id")): w for w in wiersze} for nazwa, wiersze in T.items()}
+    szukana = _klucz(EDUPAGE_KLASA)
+    klasa = next((k for k in T.get("classes", [])
+                  if szukana in (_klucz(k.get("name")), _klucz(k.get("short")), _klucz(str(k.get("id"))))), None)
+    if klasa is None:
+        raise ValueError(f"nie ma klasy {EDUPAGE_KLASA!r} w planie num={EDUPAGE_NUM} "
+                         f"(są: {', '.join(_nazwa(k) for k in T.get('classes', []))})")
+    klasa_id = str(klasa["id"])
+    link = f"{EDUPAGE_URL}/timetable/view.php?num={EDUPAGE_NUM}&class={klasa_id}"
+
+    # Tygodnie: numer (pozycja w masce „weeks” karty) → data początku z nazwy „5: 28.09 - 4.10”
+    tygodnie: list[tuple[int, date]] = []
+    for i, w in enumerate(T.get("weeks", [])):
+        if m := RE_ZAKRES_TYGODNIA.search(_nazwa(w)):
+            nr = int(w["id"]) if str(w.get("id", "")).isdigit() else i
+            tygodnie.append((nr, data_terminu(f"{m[1]}.{m[2]}", dzis)))
+    if not tygodnie:
+        raise ValueError("nazwy tygodni nie zawierają dat: " + ", ".join(_nazwa(w) for w in T.get("weeks", [])))
+
+    dni = T.get("days", [])
+    dni_tygodnia = [_dzien_tygodnia_edu(d) for d in dni]
+    if None in dni_tygodnia:
+        ostrzezenie("EduPage: nie rozpoznano dnia tygodnia dla: "
+                    + ", ".join(_nazwa(d) for d, n in zip(dni, dni_tygodnia) if n is None))
+    if len(T.get("terms", [])) > 1:
+        ostrzezenie("EduPage: plan ma kilka okresów (terms) – uwzględniam zajęcia ze wszystkich.")
+
+    wynik: list[ZajeciaEdu] = []
+    for karta in T.get("cards", []):
+        lekcja = wg_id.get("lessons", {}).get(str(karta.get("lessonid")))
+        if not lekcja or not karta.get("days") or not str(karta.get("period", "")).isdigit():
+            continue  # karta nieumieszczona w planie
+        if klasa_id not in [str(c) for c in lekcja.get("classids") or []]:
+            continue
+        p1 = int(karta["period"])
+        p2 = p1 + int(lekcja.get("durationperiods") or 1) - 1
+        dzwonki = lekcja.get("bell") or klasa.get("bell")
+        przedmiot = _nazwa(wg_id.get("subjects", {}).get(str(lekcja.get("subjectid")))) or "zajęcia"
+        nauczyciele = [n for n in (_nauczyciel(wg_id.get("teachers", {}).get(str(t)))
+                                   for t in lekcja.get("teacherids") or []) if n]
+        sale = [s for s in (_nazwa(wg_id.get("classrooms", {}).get(str(c)))
+                            for c in karta.get("classroomids") or [] if c) if s]
+        grupa = ", ".join(g for g in lekcja.get("groupnames") or [] if g)
+        maska_tygodni = karta.get("weeks") or ""
+        for di, znak in enumerate(karta["days"]):
+            if znak != "1" or di >= len(dni) or dni_tygodnia[di] is None:
+                continue
+            dzien_id = str(dni[di].get("id", di))
+            od, _ = _czas(wg_id, p1, dzien_id, dzwonki)
+            _, do = _czas(wg_id, p2, dzien_id, dzwonki)
+            for nr, poczatek in tygodnie:
+                if nr < len(maska_tygodni) and maska_tygodni[nr] == "0":
+                    continue  # ten sam filtr co w przeglądarce planu: weeks[tydzień] != "0"
+                dt = poczatek + timedelta(days=(dni_tygodnia[di] - poczatek.weekday()) % 7)
+                wynik.append(ZajeciaEdu(dt.isoformat(), p1, p2, od, do, przedmiot, nauczyciele, sale, grupa))
+
+    log(f"EduPage: klasa {_nazwa(klasa)} (id {klasa_id}), tygodni z datami: {len(tygodnie)}, zajęć: {len(wynik)}")
+    return wynik, link
+
+
+def bloki_edupage(zajecia: list[ZajeciaEdu]) -> list[Blok]:
+    """Zajęcia jednego dnia → bloki jak z PDF; kolejne godziny tych samych zajęć łączymy w jeden blok."""
+    scalone: list[ZajeciaEdu] = []
+    for z in sorted(zajecia, key=lambda z: (z.p1, z.grupa, z.przedmiot)):
+        klucz = (z.przedmiot, z.nauczyciele, z.sale, z.grupa)
+        poprzednie = next((s for s in reversed(scalone) if (s.przedmiot, s.nauczyciele, s.sale, s.grupa) == klucz), None)
+        if poprzednie and z.p1 == poprzednie.p2 + 1:
+            poprzednie.p2, poprzednie.do = z.p2, z.do
+        else:
+            scalone.append(replace(z))
+
+    bloki = []
+    for z in scalone:
+        if z.od is not None and z.do is not None:
+            godziny = f"{_hhmm(z.od)}–{_hhmm(z.do)}"
+        else:
+            godziny = f"lekcje {z.p1}–{z.p2}" if z.p2 > z.p1 else f"lekcja {z.p1}"
+        szczegoly = [x for x in (", ".join(z.nauczyciele), ", ".join(z.sale), z.grupa) if x]
+        bloki.append(Blok(godziny, [z.przedmiot] + szczegoly, z.p2 - z.p1 + 1))
+    return bloki
+
+
+def _zakres_minut(godziny: str) -> tuple[int | None, int | None]:
+    czasy = [int(g) * 60 + int(m) for g, m in RE_GODZINA.findall(godziny or "")]
+    return (czasy[0], czasy[-1]) if len(czasy) >= 2 else (None, None)
+
+
+def wzbogac_dzien(dzien: Dzien, zajecia: list[ZajeciaEdu], link: str) -> Dzien:
+    """Blok z planu sal (prowadzący + sala) dostaje nazwę przedmiotu z EduPage."""
+    nowe = []
+    for b in dzien.bloki:
+        od, do = _zakres_minut(b.godziny)
+        m = RE_NAUCZYCIEL.match(b.linie[0]) if b.linie else None
+        nazwisko = _klucz(m[1]) if m else ""
+
+        def prowadzi(z: ZajeciaEdu) -> bool:
+            return any(nazwisko in _klucz(n) for n in z.nauczyciele)
+
+        pasujace = [z for z in zajecia
+                    if od is not None and z.od is not None and z.do is not None and z.od < do and od < z.do]
+        if nazwisko:
+            # Równoległe zajęcia innej grupy odpadają, jeśli prowadzący się zgadza.
+            pasujace = [z for z in pasujace if prowadzi(z)] or pasujace or [z for z in zajecia if prowadzi(z)]
+        if not pasujace:
+            nowe.append(b)
+            continue
+
+        przedmioty = list(dict.fromkeys(z.przedmiot for z in sorted(pasujace, key=lambda z: z.p1)))
+        linie = [" / ".join(przedmioty)] + b.linie
+        wg_planu = list(dict.fromkeys(n for z in pasujace for n in z.nauczyciele))
+        # Inny prowadzący niż w planie semestralnym = możliwe zastępstwo. Tylko gdy EduPage podaje nazwiska.
+        if nazwisko and any(RE_NAUCZYCIEL.match(n) for n in wg_planu) and not any(prowadzi(z) for z in pasujace):
+            linie.append("w planie EduPage: " + ", ".join(wg_planu))
+        nowe.append(Blok(b.godziny, linie, b.lekcje))
+    return replace(dzien, bloki=nowe, zrodlo="pdf+edupage", edupage_url=link)
+
+
+def polacz_z_edupage(dni: list[Dzien], zajecia: list[ZajeciaEdu], link: str, dzis: date) -> list[Dzien]:
+    """PDF ma pierwszeństwo (aktualne sale), EduPage dokleja przedmioty i dni bez PDF-a."""
+    if not zajecia:
+        return dni
+    wg_daty: dict[str, list[ZajeciaEdu]] = {}
+    for z in zajecia:
+        wg_daty.setdefault(z.data, []).append(z)
+
+    wynik = [wzbogac_dzien(d, wg_daty[d.data], link) if d.data in wg_daty else d for d in dni]
+    daty_pdf = {d.data for d in dni}
+    koniec = dzis + timedelta(days=EDUPAGE_DNI_NAPRZOD)
+    dodane = 0
+    for iso in sorted(wg_daty):
+        if iso not in daty_pdf and dzis <= date.fromisoformat(iso) <= koniec:
+            wynik.append(Dzien(data=iso, bloki=bloki_edupage(wg_daty[iso]), plik_url=link, plik_nazwa="EduPage",
+                               etykieta="Plan semestralny w EduPage", zrodlo="edupage", edupage_url=link))
+            dodane += 1
+    uzupelnione = sum(d.zrodlo == "pdf+edupage" for d in wynik)
+    log(f"EduPage: dni z PDF uzupełnione o przedmioty: {uzupelnione}, dni tylko z EduPage: {dodane}")
+    return uporzadkuj(wynik)
+
+
+def wczytaj_edupage(argumenty, dzis: date) -> tuple[list[ZajeciaEdu], str]:
+    """EduPage jest dodatkiem – błąd tylko logujemy, a strona powstaje z samych PDF-ów."""
+    if argumenty.bez_edupage:
+        return [], ""
+    try:
+        if argumenty.edupage_json:
+            odp = json.loads(Path(argumenty.edupage_json).read_text(encoding="utf-8-sig"))
+        else:
+            odp = pobierz_edupage()
+        return zajecia_edupage(odp, dzis)
+    except Exception as blad:
+        ostrzezenie(f"EduPage pominięte – {type(blad).__name__}: {blad}")
+        return [], ""
+
+
 # ═══════════════════════════ TERMINY (ręczne) ═══════════════════════════
 
 TYPY_TERMINOW = {"zaliczenie": "zaliczenie", "test": "test", "zajecia": "zajęcia", "info": "informacja"}
@@ -852,6 +1149,8 @@ h1{margin:0;font-size:clamp(2.6rem,11.5vw,4.4rem);line-height:.92;font-weight:80
 .szczegol{font-size:.9rem;line-height:1.35;color:var(--szary)}
 .wolne{margin:0;padding:.9rem 1rem;border-radius:12px;background:var(--info-tlo);color:var(--szary)}
 .zrodlo{margin:1rem 0 0;font-size:.85rem;color:var(--szary)}
+.dzien.z-edupage,.dzien.z-edupage.jest-najblizszy{border-style:dashed}
+.z-edupage .blok-tresc{border-left-style:dashed}
 
 .brak{margin:0;padding:1.1rem 1.15rem;border-radius:16px;background:var(--papier);border:1px dashed var(--blekit-jasny);color:var(--szary)}
 
@@ -994,11 +1293,21 @@ def html_dnia(d: Dzien) -> str:
     else:
         tresc = '<p class="wolne">Tego dnia grupa nie ma zajęć.</p>'
 
+    if d.zrodlo == "edupage":
+        klasa_dnia = "dzien z-edupage"
+        zrodlo = (f'Z planu semestralnego w <a href="{e(d.edupage_url)}" target="_blank" rel="noopener">EduPage</a>. '
+                  f"Sale mogą się jeszcze zmienić – plan sal szkoła publikuje na kilka dni przed zjazdem.")
+    else:
+        klasa_dnia = "dzien"
+        zrodlo = f'Plik PDF: <a href="{e(d.plik_url)}" target="_blank" rel="noopener">{e(d.plik_nazwa)}</a>'
+        if d.zrodlo == "pdf+edupage":
+            zrodlo += f' · przedmioty z <a href="{e(d.edupage_url)}" target="_blank" rel="noopener">EduPage</a>'
+
     return (
-        f'<article class="dzien"{atrybut}>'
+        f'<article class="{klasa_dnia}"{atrybut}>'
         f'<header class="dzien-naglowek"><h2>{tytul}</h2><span class="kiedy"></span></header>'
         f"{tresc}"
-        f'<p class="zrodlo">Plik PDF: <a href="{e(d.plik_url)}" target="_blank" rel="noopener">{e(d.plik_nazwa)}</a></p>'
+        f'<p class="zrodlo">{zrodlo}</p>'
         f"</article>"
     )
 
@@ -1095,7 +1404,7 @@ def renderuj(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str],
   </section>
 
   <footer class="stopka">
-    <p>Plan pochodzi z plików PDF w <a href="{URL_STRONY}">Strefie Słuchacza TEB Poznań</a>. Strona sprawdza je co godzinę, ostatnia aktualizacja: {kiedy}.</p>
+    <p>Plan pochodzi z plików PDF w <a href="{URL_STRONY}">Strefie Słuchacza TEB Poznań</a> oraz z <a href="{EDUPAGE_URL}/timetable/view.php?num={EDUPAGE_NUM}">planu semestralnego w EduPage</a> (nazwy przedmiotów i zjazdy bez PDF-a). Strona sprawdza je co godzinę, ostatnia aktualizacja: {kiedy}.</p>
     <p><a href="https://github.com/KrySQL/TM_WE/">Repozytorium</a></p>
   </footer>
 </main>
@@ -1130,9 +1439,13 @@ def zapisz_strone(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str])
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generator strony z planem zajęć.")
     parser.add_argument("--pdf", nargs="+", metavar="PLIK", help="przeanalizuj lokalne PDF-y zamiast pobierać")
+    parser.add_argument("--edupage-json", metavar="PLIK",
+                        help="odpowiedź regularttGetData zapisana z DevTools zamiast pobierania z EduPage")
+    parser.add_argument("--bez-edupage", action="store_true", help="nie łącz planu z EduPage")
     argumenty = parser.parse_args()
 
-    terminy = wczytaj_terminy(datetime.now(STREFA).date())
+    dzis = datetime.now(STREFA).date()
+    terminy = wczytaj_terminy(dzis)
 
     if argumenty.pdf:
         pliki = [{"url": Path(p).resolve().as_uri(), "nazwa": Path(p).name, "etykieta": "",
@@ -1158,7 +1471,8 @@ def main() -> int:
             ostrzezenie(f"Nie udało się odczytać {plik['nazwa']}")
             ostrzezenia.append(f"Nie udało się odczytać pliku {plik['nazwa']}.")
 
-    zapisz_strone(uporzadkuj(dni), terminy, ostrzezenia)
+    zajecia, link_edupage = wczytaj_edupage(argumenty, dzis)
+    zapisz_strone(polacz_z_edupage(uporzadkuj(dni), zajecia, link_edupage, dzis), terminy, ostrzezenia)
     return 0
 
 
