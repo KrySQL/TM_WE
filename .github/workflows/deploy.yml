@@ -3,7 +3,7 @@ name: Aktualizuj Plan Zajęć
 on:
   workflow_dispatch:          # ręczne uruchomienie z zakładki Actions
   schedule:
-    - cron: "7 * * * *"       # co godzinę, w 7. minucie (o pełnych godzinach GitHub mocno opóźnia start)
+    - cron: "23 * * * *"       # co godzinę, w 7. minucie (o pełnych godzinach GitHub mocno opóźnia start)
   push:
     branches:
       - main                  # każda zmiana w repo (np. w terminy.json) od razu odświeża stronę
