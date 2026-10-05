@@ -1,9 +1,9 @@
 [
-  { "data": "10.10", "typ": "info",       "opis": "możliwa wejściówka z przeciwwskazań do masażu klasycznego" },
-  { "data": "10.10", "typ": "zajecia",    "opis": "Klatka, brzuch (6 godz.)" },
-  { "data": "11.10", "typ": "zajecia",    "opis": "KK: KD & KG – powtórka poprzez praktykę / karty pracy" },
+  { "data": "10.10", "typ": "info",       "opis": "Teoria Masażu: możliwa wejściówka z przeciwwskazań do masażu klasycznego" },
+  { "data": "10.10", "typ": "zajecia",    "opis": "Pracownia Masażu: Klatka, brzuch (6 godz.)" },
+  { "data": "11.10", "typ": "zajecia",    "opis": "Anatomia: KD & KG – powtórka poprzez praktykę - karty pracy" },
   { "data": "10.10", "typ": "info",       "opis": "DIP - możliwe odpytanie na początku zajęć z pomiarów liniowych KD i KG" },
-  { "data": "17.10", "typ": "zaliczenie", "opis": "Klatka, szyja (2 godz.)" },
+  { "data": "17.10", "typ": "zaliczenie", "opis": "Pracownia Masażu: Klatka, szyja (2 godz.)" },
   { "data": "18.10", "typ": "test",       "opis": "Anatomia: test z KK: KD & KG" },
-  { "data": "24.10", "typ": "zaliczenie", "opis": "Brzuch, MOS (2 godz.)" }
+  { "data": "24.10", "typ": "zaliczenie", "opis": "Pracownia Masażu: Brzuch, MOS (2 godz.)" }
 ]
