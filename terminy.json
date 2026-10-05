@@ -1,7 +1,5 @@
 [
-  { "data": "03.10", "typ": "zaliczenie", "opis": "BHP i PPOŻ" },
-  { "data": "04.10", "typ": "zaliczenie", "opis": "Grzbiet (6 godz.) + możliwa wejściówka z przeciwwskazań do masażu klasycznego" },
-  { "data": "04.10", "typ": "info",       "opis": "Duża szansa na brak zajęć z Anatomii i Fizjoterapii (chyba że będzie zastępstwo)" },
+  { "data": "10.10", "typ": "info",       "opis": "możliwa wejściówka z przeciwwskazań do masażu klasycznego" },
   { "data": "10.10", "typ": "zajecia",    "opis": "Klatka, brzuch (6 godz.)" },
   { "data": "11.10", "typ": "zajecia",    "opis": "KK: KD & KG – powtórka poprzez praktykę / karty pracy" },
   { "data": "17.10", "typ": "zaliczenie", "opis": "Klatka, szyja (2 godz.)" },
