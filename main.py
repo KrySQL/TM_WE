@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Plan zajęć grupy „I Technik masażysta_we” (TEB Edukacja Poznań) jako strona WWW. 
+Plan zajęć grupy „I Technik masażysta_we” (TEB Edukacja Poznań) jako strona WWW.    
 
 Co godzinę (GitHub Actions):
   1. Chromium (Playwright) otwiera Strefę Słuchacza i czeka, aż Cloudflare przepuści,
