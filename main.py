@@ -27,7 +27,7 @@ import time
 import traceback
 import unicodedata
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from urllib.parse import unquote, urljoin, urlparse
 from zoneinfo import ZoneInfo
@@ -41,6 +41,14 @@ from bs4 import BeautifulSoup
 URL_STRONY = "https://teb.pl/oddzialy/d/poznan/strefa-sluchacza/"
 PREFIKS_PDF = "/wp-content/uploads/poznan/"
 NAZWA_GRUPY = "I Technik masażysta_we"
+
+# Licznik „Do końca technikum” na górze strony: (nazwa, pierwszy dzień zajęć, ostatni dzień zajęć).
+# Wakacje między latami licznik wylicza sam. Ostatni dzień roku szkolnego to najbliższy piątek
+# po 20 czerwca (rozporządzenie MEN w sprawie organizacji roku szkolnego): 25.06.2027 i 23.06.2028.
+LATA_NAUKI = [
+    ("I rok", date(2026, 9, 1), date(2027, 6, 25)),
+    ("II rok", date(2027, 9, 1), date(2028, 6, 23)),
+]
 
 # TYLKO „I Technik masażysta_we” (także gdy nazwa jest złamana w komórce na dwie linie).
 # Nie łapie „I Technik masażysta” bez „_we”, „II Technik masażysta_we” ani „…masażysta_wd”.
@@ -812,7 +820,7 @@ a:focus-visible,summary:focus-visible{outline:3px solid var(--blekit);outline-of
 
 /* Niebieski pasek u góry – jak oznakowanie w przychodni */
 .pasek{background:var(--pasek);color:#fff}
-.pasek-srodek{max-width:44rem;margin:0 auto;padding:2.1rem 1.25rem 2.3rem;display:flex;align-items:center;gap:1rem}
+.pasek-srodek{max-width:44rem;margin:0 auto;padding:2.1rem 1.25rem 3.4rem;display:flex;align-items:center;gap:1rem}
 .krzyz{flex:none;width:clamp(3rem,13vw,4.4rem);height:auto}
 .krzyz .tlo-krzyza{fill:#fff}
 .krzyz .ramie{fill:var(--pasek)}
@@ -828,6 +836,31 @@ h1{margin:0;font-size:clamp(2.6rem,11.5vw,4.4rem);line-height:.92;font-weight:80
 .ostrzezenie{padding:.85rem 1.1rem;border-radius:14px;background:var(--bursztyn-tlo);font-size:.95rem}
 .ostrzezenie p{margin:0}
 .ostrzezenie ul{margin:.4rem 0 0;padding-left:1.2rem}
+
+/* Licznik do końca nauki – tabliczka nachodząca na niebieski pasek */
+.licznik{position:relative;margin-top:-2.75rem;padding:1.15rem 1.15rem 1rem;background:var(--papier);
+  border:1px solid var(--linia);border-radius:18px;box-shadow:0 16px 36px -22px rgba(14,42,71,.55)}
+.licznik-gora{display:flex;align-items:flex-end;justify-content:space-between;gap:.5rem 1rem;flex-wrap:wrap}
+.licznik-tytul{margin:0;font-size:1rem;font-weight:650;line-height:1.3;color:var(--blekit)}
+.licznik-liczba{margin:.25rem 0 0;display:flex;align-items:baseline;gap:.45rem;line-height:.85}
+.licznik-liczba strong{font-size:clamp(3.2rem,15vw,4.6rem);font-weight:800;font-stretch:75%;letter-spacing:-.025em;font-variant-numeric:tabular-nums}
+#licznik-jedn{font-size:1.35rem;font-weight:700;font-stretch:85%;color:var(--szary)}
+.licznik-procent{margin:0;display:flex;flex-direction:column;align-items:flex-end;line-height:1}
+.licznik-procent strong{font-size:clamp(1.9rem,8vw,2.6rem);font-weight:750;font-stretch:78%;color:var(--blekit-mocny);font-variant-numeric:tabular-nums}
+.licznik-procent span{margin-top:.3rem;font-size:.9rem;color:var(--szary)}
+.tor{position:relative;margin-top:1.2rem}
+.tor-odcinki{display:flex;height:.9rem;border:1px solid var(--blekit-jasny);border-radius:999px;overflow:hidden;background:var(--blekit-tlo)}
+.odcinek{position:relative;flex:1 1 0;min-width:0}
+.odcinek-pelny{position:absolute;inset:0 auto 0 0;background:var(--blekit)}
+.odcinek-wakacje{background:repeating-linear-gradient(135deg,var(--blekit-jasny) 0 3px,transparent 3px 7px)}
+.odcinek-wakacje .odcinek-pelny{background:repeating-linear-gradient(135deg,var(--blekit) 0 3px,var(--blekit-jasny) 3px 7px)}
+.tor-miesiac{position:absolute;top:1px;bottom:1px;width:2px;margin-left:-1px;background:var(--papier);opacity:.85}
+.tor-dzis{position:absolute;top:-.3rem;bottom:-.3rem;width:4px;margin-left:-2px;border-radius:2px;background:var(--tusz);box-shadow:0 0 0 2px var(--papier)}
+.tor-podpisy{display:flex;margin-top:.5rem;font-size:.85rem;line-height:1.3;color:var(--szary)}
+.tor-podpisy>span{flex:1 1 0;min-width:0;display:flex;justify-content:center;white-space:nowrap}
+.tor-podpisy .zaliczony{color:var(--blekit);font-weight:650}
+.tor-podpisy .zaliczony>span::after{content:" ✓"}
+.licznik-koniec{margin:.75rem 0 0;font-size:.9rem;color:var(--szary)}
 
 .dni{margin-top:1.5rem;display:grid;gap:1rem}
 .dzien{background:var(--papier);border:1px solid var(--linia);border-radius:18px;padding:1.3rem 1.15rem 1.35rem}
@@ -885,13 +918,14 @@ h1{margin:0;font-size:clamp(2.6rem,11.5vw,4.4rem);line-height:.92;font-weight:80
 @media (max-width:26rem){
   .blok{grid-template-columns:3.7rem 1fr;gap:0 .65rem}
   .termin{grid-template-columns:4.6rem 1fr;gap:.8rem}
-  .dzien,.terminy{padding-left:.95rem;padding-right:.95rem}
+  .dzien,.terminy,.licznik{padding-left:.95rem;padding-right:.95rem}
 }
 @media print{
   body{background:#fff}
   .pasek{background:#fff;color:#000}
+  .pasek-srodek{padding-bottom:2.1rem}
   .grupa,.grupa strong{color:#000}
-  .baner,.stopka,.minione{display:none}
+  .baner,.stopka,.minione,.licznik{display:none}
   .dzien{break-inside:avoid;box-shadow:none}
 }
 """
@@ -945,6 +979,45 @@ JS = """
     baner.appendChild(nastepny.querySelector(".wpisy").cloneNode(true));
     baner.hidden = false;
   }
+})();
+
+// Licznik do końca nauki. index.html zmienia się tylko przy nowych danych,
+// więc liczby przeliczamy w przeglądarce – są aktualne każdego dnia.
+(function () {
+  var licznik = document.getElementById("licznik");
+  if (!licznik) return;
+  function dzien(iso) { var p = iso.split("-"); return new Date(+p[0], +p[1] - 1, +p[2]); }
+  function dni(od, doDnia) { return Math.round((doDnia - od) / 86400000); }
+  function procentZ(czesc, calosc) { return Math.min(Math.max(czesc / Math.max(calosc, 1), 0), 1) * 100; }
+  function odmiana(n, jeden, kilka, wiele) {
+    if (n === 1) return jeden;
+    var j = n % 10, s = n % 100;
+    return j >= 2 && j <= 4 && (s < 12 || s > 14) ? kilka : wiele;
+  }
+
+  var dzis = new Date(); dzis.setHours(0, 0, 0, 0);
+  var start = dzien(licznik.dataset.start), koniec = dzien(licznik.dataset.koniec);
+  var zostalo = dni(dzis, koniec);
+  var procent = procentZ(dni(start, dzis), dni(start, koniec));
+  var tekst = (procent >= 100 ? "100" : procent.toFixed(1).replace(".", ",")) + "%";
+
+  var liczba = document.getElementById("licznik-dni"), jedn = document.getElementById("licznik-jedn");
+  if (zostalo > 0) { liczba.textContent = zostalo; jedn.textContent = odmiana(zostalo, "dzień", "dni", "dni"); }
+  else if (zostalo === 0) { liczba.textContent = "Dziś"; jedn.textContent = "ostatni dzień"; }
+  else { liczba.textContent = "0"; jedn.textContent = "dni, gratulacje!"; }
+  document.getElementById("licznik-procent").textContent = tekst;
+
+  var podpisy = licznik.querySelectorAll(".tor-podpisy > span");
+  licznik.querySelectorAll(".odcinek").forEach(function (el, i) {
+    var od = dzien(el.dataset.od);
+    var pelny = procentZ(dni(od, dzis), dni(od, dzien(el.dataset.do)));
+    el.querySelector(".odcinek-pelny").style.width = pelny + "%";
+    if (podpisy[i]) podpisy[i].classList.toggle("zaliczony", pelny >= 100 && el.classList.contains("odcinek-nauka"));
+  });
+  document.getElementById("tor-dzis").style.left = procent + "%";
+  var tor = licznik.querySelector(".tor");
+  tor.setAttribute("aria-valuenow", procent.toFixed(1));
+  tor.setAttribute("aria-valuetext", tekst + " za Tobą");
 })();
 """
 
@@ -1029,6 +1102,103 @@ def html_terminow(terminy: list[dict]) -> str:
     return f'<ol class="lista-terminow">{"".join(pozycje)}</ol>'
 
 
+# ── Licznik do końca nauki ──
+
+
+def odmiana(n: int, jeden: str, kilka: str, wiele: str) -> str:
+    """Polska odmiana po liczebniku: 1 dzień, 2 dni, 5 dni / 1 tydzień, 3 tygodnie, 12 tygodni."""
+    if n == 1:
+        return jeden
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return kilka
+    return wiele
+
+
+def odcinki_nauki() -> list[tuple[str, str, date, date]]:
+    """
+    Oś czasu nauki bez dziur: [(rodzaj, nazwa, od, do)], rodzaj to „nauka” albo „wakacje”.
+    „do” to początek następnego odcinka, a w ostatnim – ostatni dzień zajęć, więc długości
+    odcinków sumują się dokładnie do długości całej nauki.
+    """
+    odcinki = []
+    for i, (nazwa, od, do) in enumerate(LATA_NAUKI):
+        if i + 1 == len(LATA_NAUKI):
+            odcinki.append(("nauka", nazwa, od, do))
+            break
+        nastepny = LATA_NAUKI[i + 1][1]
+        przerwa = do + timedelta(days=1)
+        odcinki.append(("nauka", nazwa, od, przerwa))
+        if przerwa < nastepny:
+            odcinki.append(("wakacje", "wakacje", przerwa, nastepny))
+    return odcinki
+
+
+def poczatki_miesiecy(od: date, do: date) -> list[date]:
+    """Pierwsze dni miesięcy leżące między od a do – kreski miesięcy na torze."""
+    wynik = []
+    d = date(od.year + od.month // 12, od.month % 12 + 1, 1)
+    while d < do:
+        wynik.append(d)
+        d = date(d.year + d.month // 12, d.month % 12 + 1, 1)
+    return wynik
+
+
+def html_licznika(dzis: date) -> str:
+    """
+    Tabliczka „Do końca technikum”: dni do końca, procent za sobą i tor z latami nauki.
+    Liczby z chwili generowania to tylko stan początkowy – JS przelicza je w przeglądarce.
+    """
+    start, koniec = LATA_NAUKI[0][1], LATA_NAUKI[-1][2]
+    calosc = max((koniec - start).days, 1)
+
+    def pozycja(d: date) -> float:
+        return min(max((d - start).days / calosc * 100, 0), 100)
+
+    procent = pozycja(dzis)
+    tekst_procentu = ("100" if procent >= 100 else f"{procent:.1f}".replace(".", ",")) + "%"
+    zostalo = (koniec - dzis).days
+    if zostalo > 0:
+        liczba, jednostka = str(zostalo), odmiana(zostalo, "dzień", "dni", "dni")
+    elif zostalo == 0:
+        liczba, jednostka = "Dziś", "ostatni dzień"
+    else:
+        liczba, jednostka = "0", "dni, gratulacje!"
+
+    odcinki, podpisy = [], []
+    for rodzaj, nazwa, od, do in odcinki_nauki():
+        dlugosc = max((do - od).days, 1)
+        pelny = min(max((dzis - od).days / dlugosc * 100, 0), 100)
+        zaliczony = " zaliczony" if rodzaj == "nauka" and pelny >= 100 else ""
+        odcinki.append(f'<span class="odcinek odcinek-{rodzaj}" style="flex-grow:{dlugosc}" '
+                       f'data-od="{od.isoformat()}" data-do="{do.isoformat()}">'
+                       f'<span class="odcinek-pelny" style="width:{pelny:.2f}%"></span></span>')
+        podpisy.append(f'<span class="podpis-{rodzaj}{zaliczony}" style="flex-grow:{dlugosc}">'
+                       f'<span>{e(nazwa)}</span></span>')
+    html_odcinkow = "".join(odcinki)
+    html_podpisow = "".join(podpisy)
+    html_kresek = "".join(f'<span class="tor-miesiac" style="left:{pozycja(d):.2f}%"></span>'
+                          for d in poczatki_miesiecy(start, koniec))
+    # Twarde spacje: „23 czerwca 2028” nie łamie się na wąskim ekranie.
+    ostatni = f"{DNI[koniec.weekday()]} {koniec.day}&nbsp;{MIESIACE[koniec.month - 1]}&nbsp;{koniec.year}"
+
+    return f"""<section class="licznik" id="licznik" data-start="{start.isoformat()}" data-koniec="{koniec.isoformat()}" aria-labelledby="licznik-tytul">
+      <div class="licznik-gora">
+        <div>
+          <h2 class="licznik-tytul" id="licznik-tytul">Do końca technikum</h2>
+          <p class="licznik-liczba"><strong id="licznik-dni">{liczba}</strong><span id="licznik-jedn">{jednostka}</span></p>
+        </div>
+        <p class="licznik-procent"><strong id="licznik-procent">{tekst_procentu}</strong><span>za Tobą</span></p>
+      </div>
+      <div class="tor" role="progressbar" aria-labelledby="licznik-tytul" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{procent:.1f}" aria-valuetext="{tekst_procentu} za Tobą">
+        <div class="tor-odcinki">{html_odcinkow}</div>
+        {html_kresek}
+        <span class="tor-dzis" id="tor-dzis" style="left:{procent:.2f}%"></span>
+      </div>
+      <div class="tor-podpisy" aria-hidden="true">{html_podpisow}</div>
+      <p class="licznik-koniec">Ostatni dzień zajęć: {ostatni}</p>
+    </section>"""
+
+
 def renderuj(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str],
              odcisk: str, zaktualizowano: datetime) -> str:
     if dni:
@@ -1047,6 +1217,7 @@ def renderuj(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str],
     kiedy = (f"{zaktualizowano.day} {MIESIACE[zaktualizowano.month - 1]} {zaktualizowano.year}, "
              f"{zaktualizowano:%H:%M}")
     opis = f"Aktualny plan zajęć grupy {NAZWA_GRUPY} w TEB Edukacja Poznań oraz terminy zaliczeń."
+    html_licz = html_licznika(zaktualizowano.date())
 
     return f"""<!DOCTYPE html>
 <html lang="pl">
@@ -1078,6 +1249,7 @@ def renderuj(dni: list[Dzien], terminy: list[dict], ostrzezenia: list[str],
 </header>
 <main class="strona">
   <div class="gora">
+    {html_licz}
     <div class="baner" id="baner" hidden></div>
     {html_ostrz}
   </div>
