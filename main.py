@@ -5,7 +5,7 @@ Plan zajęć grupy „I Technik masażysta_we” (TEB Edukacja Poznań) jako str
 Co godzinę (GitHub Actions):
   1. Chromium (Playwright) otwiera Strefę Słuchacza i czeka, aż Cloudflare przepuści,
   2. zbiera linki do PDF-ów i pobiera je w tej samej sesji przeglądarki,
-  3. z tabel w PDF wyciąga wiersz grupy: godziny, przedmiot, prowadzący, sala,
+  3. z tabel w PDF wyciąga wiersz grupy: godziny, przedmiot, prowadzący, sala,  
   4. zapisuje index.html, który workflow publikuje na GitHub Pages.
 
 Gdy strona szkoły nie odpowiada, skrypt kończy się kodem 1 – workflow niczego
