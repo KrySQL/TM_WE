@@ -1,8 +1,7 @@
 [
-{ "data": "13.11", "typ": "info", "opis": "DIP: na dziś należy poznać teorie wyliczania miar ruchomości (więcej info na teams)" },
-{ "data": "14.11", "typ": "zaliczenie", "opis": "Pracownia masażu: masaż karku"},
 { "data": "14.11", "typ": "zaliczenie", "opis": "Teoria masażu: Wejściówka z przeciwskazania bezwględnych & z wywiadu gabinetowego" },
-{ "data": "20.11", "typ": "info", "opis": "DIP: na dziś należy poznać teorie korzystania z goniometru w tym punkty gdzie przykładać (więcej info na teams)" },
-{ "data": "21.11", "typ": "zaliczenie", "opis": "Pracownia masażu: KG" },
-{ "data": "21.11", "typ": "zaliczenie", "opis": "Teoria masażu: wypisać techniki: rozluźniające / pobudzające / odżywiające" }
+{ "data": "20.11", "typ": "info", "opis": "DIP: na dziś należy poznać teorie wyliczania miar ruchomości & teorie korzystania z goniometru w tym punkty gdzie przykładać (więcej info na teams)" },
+{ "data": "21.11", "typ": "info", "opis": "Pracownia masażu: twarz" },
+{ "data": "21.11", "typ": "zaliczenie", "opis": "Teoria masażu: wypisać techniki: rozluźniające / pobudzające / odżywiające" },
+{ "data": "22.11", "typ": "zaliczenie", "opis": "Pracownia fizjiterapii: wejściówka - pytania na fb" }
 ]
